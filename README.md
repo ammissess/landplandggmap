@@ -17,7 +17,7 @@ Draw a polygon shape and calculate its area on the Mapbox map.
 - Room
 
 ## Demo
-![demo](https://youtu.be/jmOmcZzAIbc)
+![demo](https://img.youtube.com/vi/jmOmcZzAIbc/0.jpg)](https://youtu.be/jmOmcZzAIbc)
 
 ## Opening in Android Studio
 
