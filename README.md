@@ -16,8 +16,8 @@ Draw a polygon shape and calculate its area on the Mapbox map.
 - JUnit
 - Room
 
-## Demo
-![demo](https://img.youtube.com/vi/jmOmcZzAIbc/0.jpg)](https://youtu.be/jmOmcZzAIbc)
+## Demo(Click to Play)
+[![demo](https://img.youtube.com/vi/jmOmcZzAIbc/0.jpg)](https://youtu.be/jmOmcZzAIbc)
 
 ## Opening in Android Studio
 
