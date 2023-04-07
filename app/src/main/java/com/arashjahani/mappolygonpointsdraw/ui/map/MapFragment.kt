@@ -95,7 +95,7 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
 
     private fun prepareViews() {
 
-        mMapView = view?.findViewById(R.id.mapView)
+        mMapView = binding.mapView
         mMapView?.getMapboxMap()?.loadStyleUri(Style.MAPBOX_STREETS)
         // Create an instance of the Annotation API and get the polygon manager.
         mAnnotationApi = mMapView?.annotations
