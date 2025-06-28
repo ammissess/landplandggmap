@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "206684829355",
+    "project_id": "appmap-80ea1",
+    "storage_bucket": "appmap-80ea1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:206684829355:android:db3a39347fb67491e6a9ee",
+        "android_client_info": {
+          "package_name": "com.arashjahani.mappolygonpointsdraw"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "206684829355-m8v4k7rlopdgot6ovikbe5m37tf4h3pm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoMC1kqBfHsTJJxGE0CyYqysDB52aS9ro"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "206684829355-m8v4k7rlopdgot6ovikbe5m37tf4h3pm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:206684829355:android:aba4b1b4c6c77d6ee6a9ee",
+        "android_client_info": {
+          "package_name": "com.example.map"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "206684829355-m8v4k7rlopdgot6ovikbe5m37tf4h3pm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoMC1kqBfHsTJJxGE0CyYqysDB52aS9ro"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "206684829355-m8v4k7rlopdgot6ovikbe5m37tf4h3pm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
