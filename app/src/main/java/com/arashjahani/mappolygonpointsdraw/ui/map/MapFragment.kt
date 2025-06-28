@@ -4,19 +4,21 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.location.Location
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
-import androidx.lifecycle.coroutineScope
-import androidx.recyclerview.widget.RecyclerView
+import androidx.lifecycle.lifecycleScope
 import com.arashjahani.mappolygonpointsdraw.R
 import com.arashjahani.mappolygonpointsdraw.data.entity.PolygonWithPoints
 import com.arashjahani.mappolygonpointsdraw.databinding.FragmentMapBinding
@@ -42,14 +44,27 @@ import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolygonAnnotationManager
+import com.mapbox.search.ResponseInfo
+import com.mapbox.search.SearchEngine
+import com.mapbox.search.SearchEngineSettings
+import com.mapbox.search.result.SearchResult
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayList
-
+import androidx.recyclerview.widget.RecyclerView
+import com.mapbox.search.SearchCallback
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import com.mapbox.search.ReverseGeoOptions
+import kotlinx.coroutines.asExecutor
 @AndroidEntryPoint
 class MapFragment : Fragment(), PolygonsItemClickListener {
 
     companion object {
+        private const val TAG = "MapFragment"
         fun newInstance() = MapFragment()
     }
 
@@ -70,6 +85,7 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
     private lateinit var mFusedLocationClient: FusedLocationProviderClient
     private val firebaseAuth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
+    private lateinit var searchEngine: SearchEngine
 
     private var allowedDistrict: String? = null
     private var allowedProvince: String? = null
@@ -78,13 +94,17 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         mFusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
+
+        // Khởi tạo SearchEngine không cần LocationProvider
+        val settings = SearchEngineSettings()
+        searchEngine = SearchEngine.createSearchEngine(settings)
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
+        inflater: LayoutInflater,
+        container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        super.onCreateView(inflater, container, savedInstanceState)
+    ): View {
         _binding = FragmentMapBinding.inflate(inflater, container, false)
         return binding.root
     }
@@ -95,20 +115,27 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         prepareViews()
         initObservers()
         initListeners()
-        fetchUserPermissions()
+
+        lifecycleScope.launch {
+            fetchUserPermissions()
+            if (firebaseAuth.currentUser != null) {
+                checkInitialLocationPermission()
+            }
+        }
     }
 
     private fun prepareViews() {
         mMapView = binding.mapView
         mMapView?.getMapboxMap()?.loadStyleUri(Style.MAPBOX_STREETS)
         mAnnotationApi = mMapView?.annotations
-        mPolygonAnnotationManager = mAnnotationApi?.createPolygonAnnotationManager(mMapView!!)
+        // Cập nhật cách tạo PolygonAnnotationManager
+        mPolygonAnnotationManager = mAnnotationApi?.createPolygonAnnotationManager()
         mPointsList.add(ArrayList())
         loadSavedPolygonsList()
     }
 
     private fun initObservers() {
-        lifecycle.coroutineScope.launch {
+        lifecycleScope.launch {
             mMapViewModel.getAllPolygons().collect {
                 mSavedPolygonsAdapter?.renewItems(it)
             }
@@ -122,11 +149,13 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
 
         binding.btnAddPoint.setOnClickListener {
             mMapView?.getMapboxMap()?.cameraState?.center?.let { point ->
-                if (isPointInAllowedDistrict(point)) {
-                    mPointsList.first().add(point)
-                    drawPolygon(mPointsList)
-                } else {
-                    Toast.makeText(requireContext(), "You are not allowed to draw in this district", Toast.LENGTH_SHORT).show()
+                lifecycleScope.launch {
+                    if (isPointInAllowedDistrict(point)) {
+                        mPointsList.first().add(point)
+                        drawPolygon(mPointsList)
+                    } else {
+                        showDistrictWarning()
+                    }
                 }
             }
         }
@@ -134,6 +163,7 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         binding.btnSavePolygon.setOnClickListener {
             if (firebaseAuth.currentUser == null) {
                 Toast.makeText(requireContext(), "Please log in to save polygons", Toast.LENGTH_SHORT).show()
+                startActivity(Intent(requireActivity(), LoginActivity::class.java))
                 return@setOnClickListener
             }
             savePolygon()
@@ -142,6 +172,7 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         binding.btnDrawPolygon.setOnClickListener {
             if (firebaseAuth.currentUser == null) {
                 Toast.makeText(requireContext(), "Please log in to draw polygons", Toast.LENGTH_SHORT).show()
+                startActivity(Intent(requireActivity(), LoginActivity::class.java))
                 return@setOnClickListener
             }
             binding.layoutAddPolygonNavigator.visibility = View.VISIBLE
@@ -160,38 +191,119 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         binding.btnList.setOnClickListener {
             if (firebaseAuth.currentUser == null) {
                 Toast.makeText(requireContext(), "Please log in to view saved polygons", Toast.LENGTH_SHORT).show()
+                startActivity(Intent(requireActivity(), LoginActivity::class.java))
                 return@setOnClickListener
             }
             mSavedPolygonsBottomSheetDialog?.show()
         }
     }
 
-    private fun fetchUserPermissions() {
-        val user = firebaseAuth.currentUser
-        if (user != null) {
-            firestore.collection("users").document(user.uid).get()
-                .addOnSuccessListener { document ->
-                    if (document.exists()) {
-                        allowedDistrict = document.getString("district")
-                        allowedProvince = document.getString("province")
-                        allowedCountry = document.getString("country")
-                    }
-                }
-                .addOnFailureListener {
-                    Toast.makeText(requireContext(), "Failed to fetch user permissions", Toast.LENGTH_SHORT).show()
-                }
+    private suspend fun fetchUserPermissions() {
+        val user = firebaseAuth.currentUser ?: return
+
+        try {
+            val document = firestore.collection("users").document(user.uid).get().await()
+            allowedDistrict = document.getString("district")
+            allowedProvince = document.getString("province")
+            allowedCountry = document.getString("country")
+
+            allowedDistrict?.let {
+                Toast.makeText(requireContext(),
+                    "You can only draw in $it district",
+                    Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch user permissions", e)
+            Toast.makeText(requireContext(),
+                "Failed to load district restrictions",
+                Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun isPointInAllowedDistrict(point: Point): Boolean {
-        // Logic kiểm tra xem điểm có thuộc district được cấp phép hay không
-        // Hiện tại giả định luôn đúng
-        return true
+    private suspend fun isPointInAllowedDistrict(point: Point): Boolean {
+        val user = firebaseAuth.currentUser ?: return false
+
+        return try {
+            val document = firestore.collection("users").document(user.uid).get().await()
+            val allowedDistrict = document.getString("district")
+
+            if (allowedDistrict.isNullOrEmpty()) {
+                return true
+            }
+
+            withContext(Dispatchers.IO) {
+                suspendCoroutine<Boolean> { continuation ->
+                    // Tạo ReverseGeoOptions
+                    val reverseGeoOptions = ReverseGeoOptions(
+                        center = point,
+                        limit = 1
+                    )
+
+                    searchEngine.search(
+                        reverseGeoOptions,
+                        Dispatchers.IO.asExecutor(),
+                        object : SearchCallback {
+                            override fun onResults(
+                                results: List<SearchResult>,
+                                responseInfo: ResponseInfo
+                            ) {
+                                val isAllowed = results.any { result ->
+                                    result.address?.district?.equals(allowedDistrict, ignoreCase = true) == true
+                                }
+                                continuation.resume(isAllowed)
+                            }
+
+                            override fun onError(e: Exception) {
+                                Log.e(TAG, "Search error: ${e.message}")
+                                continuation.resume(false)
+                            }
+                        }
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking district: ${e.message}")
+            false
+        }
+    }
+
+    private fun showDistrictWarning() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("District Restriction")
+            .setMessage("You can only draw polygons in $allowedDistrict district")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private suspend fun checkInitialLocationPermission() {
+        if (ActivityCompat.checkSelfPermission(
+                requireContext(),
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                mFusedLocationClient.lastLocation.await()?.let { location ->
+                    val point = Point.fromLngLat(location.longitude, location.latitude)
+                    if (!isPointInAllowedDistrict(point)) {
+                        showDistrictWarning()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking initial location", e)
+            }
+        }
     }
 
     private fun savePolygon() {
-        // Hiển thị dialog thu thập thông tin polygon
-        // Lưu polygon vào Firestore
+        if (mPointsList.first().size < 3) {
+            Toast.makeText(requireContext(), "Add at least 3 points to save polygon", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val area = mPointsList.first().calcPolygonArea()
+        mMapViewModel.savePolygonWithPoints(area, mPointsList.first())
+        Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT).show()
+        clearMapView()
     }
 
     private fun drawPolygon(points: List<List<Point>>) {
@@ -254,9 +366,14 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         ) {
             mFusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 if (location != null) {
-                    val latitude = location.latitude
-                    val longitude = location.longitude
-                    moveToPosition(Point.fromLngLat(longitude, latitude), true)
+                    val point = Point.fromLngLat(location.longitude, location.latitude)
+                    lifecycleScope.launch {
+                        if (isPointInAllowedDistrict(point)) {
+                            moveToPosition(point, true)
+                        } else {
+                            showDistrictWarning()
+                        }
+                    }
                 } else {
                     Toast.makeText(requireContext(), "Location data not available", Toast.LENGTH_SHORT).show()
                 }
