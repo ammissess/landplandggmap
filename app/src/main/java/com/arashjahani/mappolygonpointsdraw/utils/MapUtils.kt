@@ -1,8 +1,6 @@
 package com.arashjahani.mappolygonpointsdraw.utils
-
 import com.mapbox.geojson.Point
 import com.mapbox.geojson.Polygon
-import com.mapbox.turf.TurfMeasurement
 import java.util.*
 import kotlin.math.roundToLong
 
@@ -21,7 +19,7 @@ fun List<Point>.centerOfPolygon(): Point {
     return Point.fromLngLat(lngAvg, latAvg)
 }
 
- fun List<Point>.calcPolygonArea(): Long {
-    val polygon: Polygon = Polygon.fromLngLats(Collections.singletonList(this))
-    return TurfMeasurement.area(polygon).roundToLong()
+fun List<Point>.calcPolygonArea(): Long {
+    val polygon: Polygon = Polygon.fromLngLats(listOf(this))
+    return TurfUtils.area(polygon).roundToLong()
 }

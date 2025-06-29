@@ -1,33 +1,27 @@
 package com.arashjahani.mappolygonpointsdraw.di
 
-import android.app.Application
 import android.content.Context
-import com.arashjahani.mappolygonpointsdraw.MapPolygonPointsDrawApplication
 import com.arashjahani.mappolygonpointsdraw.data.DataRepository
 import com.arashjahani.mappolygonpointsdraw.data.DataRepositoryImpl
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-@InstallIn(SingletonComponent::class)
 @Module
-class ApplicationModule {
+@InstallIn(SingletonComponent::class)
+abstract class ApplicationModule {
 
-    @Provides
-    @Singleton
-    fun providesApplication(mapPolygonPointsDrawApplication: MapPolygonPointsDrawApplication): MapPolygonPointsDrawApplication {
-        return mapPolygonPointsDrawApplication
+    companion object {
+        @Provides
+        @Singleton
+        fun provideContext(@ApplicationContext context: Context): Context = context
     }
 
-    @Provides
+    @Binds
     @Singleton
-    fun provideContext(application: Application): Context {
-        return application
-    }
-
-    @Provides
-    @Singleton
-    fun provideDataRepository(dataRepositoryImpl: DataRepositoryImpl): DataRepository =dataRepositoryImpl
+    abstract fun provideDataRepository(dataRepositoryImpl: DataRepositoryImpl): DataRepository
 }
