@@ -30,6 +30,7 @@ import com.arashjahani.mappolygonpointsdraw.R
 import com.arashjahani.mappolygonpointsdraw.ui.map.theme.MapPolygonPointsDrawTheme
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.material3.*
+import com.google.firebase.firestore.FirebaseFirestore
 
 class LoginActivity : ComponentActivity() {
 
@@ -82,9 +83,23 @@ class LoginActivity : ComponentActivity() {
         auth.signInWithEmailAndPassword(email, password)
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
-                    onSuccess()
+                    val uid = auth.currentUser?.uid
+                    if (uid != null) {
+                        FirebaseFirestore.getInstance().collection("users").document(uid).get()
+                            .addOnSuccessListener { document ->
+                                val district = document.getString("district")
+                                val intent = Intent(this, MainActivity::class.java)
+                                intent.putExtra("district", district)
+                                startActivity(intent)
+                                finish()
+                                onSuccess()
+                            }
+                    } else {
+                        startActivity(Intent(this, MainActivity::class.java))
+                        finish()
+                    }
                 } else {
-                    onError("Login failed: ${task.exception?.message}")
+                    Toast.makeText(this, "Login failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
                 }
             }
     }

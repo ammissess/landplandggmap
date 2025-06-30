@@ -156,6 +156,14 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         )
+
+        // Tự động di chuyển đến district nếu có
+        val district = activity?.intent?.getStringExtra("district")
+        if (!district.isNullOrEmpty()) {
+            lifecycleScope.launch {
+                moveToDistrict(district)
+            }
+        }
     }
 
     private fun prepareViews() {
@@ -276,7 +284,14 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         val allowedDistrict = document.getString("district") ?: return true
 
         val district = getDistrictFromLatLngNominatim(point.latitude(), point.longitude())
-        return district?.equals(allowedDistrict, ignoreCase = true) == true
+        Log.d("DistrictCheck", "Nominatim: '$district', Allowed: '$allowedDistrict'")
+
+        // Loại bỏ tiền tố "Quận", "Huyện", "Thị xã", "Thành phố" nếu có
+        fun normalize(s: String?): String =
+            s?.replace(Regex("^(Quận|Huyện|Thị xã|Thành phố)\\s*"), "")?.trim() ?: ""
+
+        return normalize(district).equals(normalize(allowedDistrict), ignoreCase = true)
+                || normalize(district).contains(normalize(allowedDistrict), ignoreCase = true)
     }
 
     private fun showDistrictWarning() {
@@ -469,6 +484,38 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         mSavedPolygonsBottomSheetDialog = null
         _binding = null
     }
+
+    // --- Thêm các hàm suspend ở dưới cùng class ---
+
+    // Hàm tự động di chuyển đến district (gọi trong coroutine)
+    private suspend fun moveToDistrict(district: String) {
+        val center = getLatLngFromDistrictName(district)
+        if (center != null) {
+            moveToPosition(center, false)
+        }
+    }
+
+    // Hàm này dùng Nominatim để lấy toạ độ trung tâm district
+    private suspend fun getLatLngFromDistrictName(district: String): Point? {
+        val url = "https://nominatim.openstreetmap.org/search?format=json&q=${district.replace(" ", "+")}"
+        val client = OkHttpClient()
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "YourAppName")
+            .build()
+        return withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: return@withContext null
+                val arr = org.json.JSONArray(body)
+                if (arr.length() > 0) {
+                    val obj = arr.getJSONObject(0)
+                    val lat = obj.getDouble("lat")
+                    val lon = obj.getDouble("lon")
+                    Point.fromLngLat(lon, lat)
+                } else null
+            }
+        }
+    }
 }
 
 // Hàm lấy district từ Nominatim (OpenStreetMap)
@@ -477,15 +524,18 @@ suspend fun getDistrictFromLatLngNominatim(lat: Double, lng: Double): String? {
     val client = OkHttpClient()
     val request = Request.Builder()
         .url(url)
-        .header("User-Agent", "YourAppName") // Bắt buộc phải có User-Agent
+        .header("User-Agent", "YourAppName")
         .build()
     return withContext(Dispatchers.IO) {
         client.newCall(request).execute().use { response ->
             val body = response.body?.string() ?: return@withContext null
             val json = JSONObject(body)
             val address = json.optJSONObject("address")
-            // Có thể là "county", "district", hoặc "state_district" tùy khu vực
-            address?.optString("county") ?: address?.optString("district")
+            Log.d("NominatimRaw", json.toString())
+            // Trả về tất cả các trường có thể
+            val fields = listOf("county", "district", "suburb", "city_district", "state_district", "region", "quarter")
+            fields.mapNotNull { address?.optString(it) }
+                .firstOrNull { it.isNotBlank() }
         }
     }
 }
