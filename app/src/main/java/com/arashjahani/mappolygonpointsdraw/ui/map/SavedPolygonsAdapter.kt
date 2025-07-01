@@ -29,7 +29,7 @@ class SavedPolygonsAdapter(
 
         // Đổi màu nền theo loại đất
         val colorHex = getLandColorHex(land.landType)
-        holder.binding.root.setBackgroundColor(android.graphics.Color.parseColor(colorHex))
+        //holder.binding.root.setBackgroundColor(android.graphics.Color.parseColor(colorHex))
 
         holder.binding.btnDelete.setOnClickListener { listener.deleteLand(land) }
         holder.binding.btnCopy.setOnClickListener { listener.copyLand(land) }

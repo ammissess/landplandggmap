@@ -15,12 +15,12 @@ class LandViewModel(
     private val _lands = MutableStateFlow<List<LandParcel>>(emptyList())
     val lands: StateFlow<List<LandParcel>> = _lands
 
+
     fun fetchLands() {
         viewModelScope.launch {
-            _lands.value = repository.getAllLands()
+            _lands.value = repository.getUserLands()
         }
     }
-
     fun addLand(land: LandParcel) {
         viewModelScope.launch {
             repository.addLand(land)

@@ -91,7 +91,7 @@ dependencies {
     // Thêm các dependencies này
     implementation 'com.mapbox.common:common:23.3.1'
     implementation 'com.squareup.okhttp3:okhttp:4.9.1'
-
+    implementation 'org.locationtech.jts:jts-core:1.19.0'
     apply plugin: 'com.google.gms.google-services'
     // Location
     implementation 'com.google.android.gms:play-services-location:21.0.1'

@@ -39,6 +39,8 @@ import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolygonAnnotationManager
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import androidx.recyclerview.widget.RecyclerView
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,6 +61,10 @@ import android.widget.EditText
 import android.widget.Spinner
 import android.widget.ArrayAdapter
 import com.arashjahani.mappolygonpointsdraw.utils.centerOfLatLngPolygon
+import com.arashjahani.mappolygonpointsdraw.utils.isPolygonIntersect
+import com.arashjahani.mappolygonpointsdraw.utils.toJtsPolygon
+import com.arashjahani.mappolygonpointsdraw.ui.map.theme.getLandColorHex
+import android.content.Context
 @AndroidEntryPoint
 class MapFragment : Fragment() {
 
@@ -90,6 +96,10 @@ class MapFragment : Fragment() {
     private var lastArea: Long = 0L
     private var lastCoordinates: List<LatLng> = emptyList()
 
+    // Saved polygons dialog
+    private var mSavedPolygonsBottomSheetDialog: BottomSheetDialog? = null
+    private var mSavedPolygonsAdapter: SavedPolygonsAdapter? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         mFusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
@@ -109,6 +119,7 @@ class MapFragment : Fragment() {
 
         prepareViews()
         initListeners()
+        loadSavedPolygonsList()
 
         lifecycleScope.launch {
             fetchUserPermissions()
@@ -183,11 +194,12 @@ class MapFragment : Fragment() {
             }
         }
 
-        // Quan sát danh sách thửa đất và vẽ lên map
+        // Quan sát danh sách thửa đất và vẽ lên map, đồng thời cập nhật adapter
         lifecycleScope.launch {
             landViewModel.fetchLands()
             landViewModel.lands.collect { lands ->
                 drawAllLands(lands)
+                mSavedPolygonsAdapter?.renewItems(lands)
             }
         }
     }
@@ -234,9 +246,23 @@ class MapFragment : Fragment() {
             }
             val area = mPointsList.calcPolygonArea()
             val coordinates = mPointsList.toLatLngList()
+
+            // Lấy danh sách các polygon đã lưu (dạng List<List<LatLng>>)
+            val oldPolygons = landViewModel.lands.value.map { it.coordinates }
+
+            if (isPolygonIntersect(coordinates, oldPolygons)) {
+                Toast.makeText(requireContext(), "Mảnh đất bị chồng lấn với mảnh khác!", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            // Nếu không giao nhau, cho phép nhập thông tin và lưu
             showAddLandDialog(area, coordinates)
         }
 
+        // Sự kiện bấm nút "Saved"
+        binding.btnList.setOnClickListener {
+            mSavedPolygonsBottomSheetDialog?.show()
+        }
         binding.btnDrawPolygon.setOnClickListener {
             if (firebaseAuth.currentUser == null) {
                 Toast.makeText(requireContext(), "Please log in to draw polygons", Toast.LENGTH_SHORT).show()
@@ -254,6 +280,57 @@ class MapFragment : Fragment() {
             binding.lblArea.visibility = View.GONE
             binding.layoutMainNavigator.visibility = View.VISIBLE
             clearMapView()
+        }
+    }
+
+    private fun loadSavedPolygonsList() {
+        if (mSavedPolygonsBottomSheetDialog == null) {
+            mSavedPolygonsBottomSheetDialog = BottomSheetDialog(requireContext())
+            mSavedPolygonsBottomSheetDialog?.setContentView(R.layout.dialog_saved_polygons_list)
+            val rcvSavedPolygons = mSavedPolygonsBottomSheetDialog?.findViewById<RecyclerView>(R.id.rcvSavedPolygons)
+            mSavedPolygonsAdapter = SavedPolygonsAdapter(ArrayList(), object : LandItemClickListener {
+                override fun deleteLand(land: LandParcel) {
+                    // Xóa khỏi Firestore
+                    lifecycleScope.launch {
+                        val db = FirebaseFirestore.getInstance()
+                        val query = db.collection("lands")
+                            .whereEqualTo("createdBy", land.createdBy)
+                            .whereEqualTo("registerDate", land.registerDate)
+                            .get().await()
+                        for (doc in query.documents) {
+                            doc.reference.delete()
+                        }
+                        Toast.makeText(requireContext(), "Đã xóa thửa đất!", Toast.LENGTH_SHORT).show()
+                        landViewModel.fetchLands()
+                    }
+                }
+
+                override fun copyLand(land: LandParcel) {
+                    val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val text = "Tên chủ đất: ${land.ownerName}\nDiện tích: ${land.area}\nLoại đất: ${land.landType}\nTọa độ: ${land.coordinates.joinToString()}"
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Land Info", text))
+                    Toast.makeText(requireContext(), "Đã copy thông tin!", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun displayOnMap(land: LandParcel) {
+                    // Vẽ lại polygon này trên bản đồ với màu theo loại đất
+                    val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                    mPolygonAnnotationManager?.deleteAll()
+                    val colorHex = com.arashjahani.mappolygonpointsdraw.ui.map.theme.getLandColorHex(land.landType)
+                    val polygonAnnotationOptions = PolygonAnnotationOptions()
+                        .withPoints(listOf(points))
+                        .withFillColor(colorHex)
+                        .withFillOpacity(0.4)
+                    mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+                    // Di chuyển camera đến polygon
+                    if (points.isNotEmpty()) {
+                        val center = points[0]
+                        moveToPosition(center, false)
+                    }
+                    mSavedPolygonsBottomSheetDialog?.dismiss()
+                }
+            })
+            rcvSavedPolygons?.adapter = mSavedPolygonsAdapter
         }
     }
 
@@ -349,10 +426,10 @@ class MapFragment : Fragment() {
             lands.forEach { land ->
                 val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
                 if (points.size > 2) {
-                    val color = getLandColor(land.landType)
+                    val colorHex = getLandColorHex(land.landType) // Trả về "#E53935"
                     val polygonAnnotationOptions = PolygonAnnotationOptions()
                         .withPoints(listOf(points))
-                        .withFillColor("#" + color.value.toString(16).takeLast(6))
+                        .withFillColor(colorHex) // Đúng kiểu String
                         .withFillOpacity(0.4)
                     mPolygonAnnotationManager?.create(polygonAnnotationOptions)
                 }
