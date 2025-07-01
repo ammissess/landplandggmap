@@ -1,8 +1,6 @@
 package com.arashjahani.mappolygonpointsdraw.di
 
 import android.content.Context
-import com.arashjahani.mappolygonpointsdraw.data.DataRepository
-import com.arashjahani.mappolygonpointsdraw.data.DataRepositoryImpl
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -21,7 +19,4 @@ abstract class ApplicationModule {
         fun provideContext(@ApplicationContext context: Context): Context = context
     }
 
-    @Binds
-    @Singleton
-    abstract fun provideDataRepository(dataRepositoryImpl: DataRepositoryImpl): DataRepository
 }

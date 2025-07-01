@@ -3,20 +3,18 @@ import com.mapbox.geojson.Point
 import com.mapbox.geojson.Polygon
 import java.util.*
 import kotlin.math.roundToLong
+import com.arashjahani.mappolygonpointsdraw.data.model.LatLng
 
-fun List<Point>.centerOfPolygon(): Point {
+fun List<LatLng>.centerOfLatLngPolygon(): LatLng {
     var latSum = 0.0
     var lngSum = 0.0
-
     for (vertex in this) {
-        latSum += vertex.latitude()
-        lngSum += vertex.longitude()
+        latSum += vertex.lat
+        lngSum += vertex.lng
     }
-
-    val latAvg: Double = latSum / this.size
-    val lngAvg: Double = lngSum / this.size
-
-    return Point.fromLngLat(lngAvg, latAvg)
+    val latAvg = latSum / this.size
+    val lngAvg = lngSum / this.size
+    return LatLng(latAvg, lngAvg)
 }
 
 fun List<Point>.calcPolygonArea(): Long {

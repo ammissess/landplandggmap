@@ -1,9 +1,6 @@
 package com.arashjahani.mappolygonpointsdraw.ui.map
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -20,14 +17,12 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.arashjahani.mappolygonpointsdraw.R
-import com.arashjahani.mappolygonpointsdraw.data.entity.PolygonWithPoints
+import com.arashjahani.mappolygonpointsdraw.data.model.LandParcel
 import com.arashjahani.mappolygonpointsdraw.databinding.FragmentMapBinding
-import com.arashjahani.mappolygonpointsdraw.utils.areaFormat
-import com.arashjahani.mappolygonpointsdraw.utils.calcPolygonArea
-import com.arashjahani.mappolygonpointsdraw.utils.centerOfPolygon
+import com.arashjahani.mappolygonpointsdraw.ui.map.theme.getLandColor
+import com.arashjahani.mappolygonpointsdraw.utils.*
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.mapbox.geojson.Point
@@ -49,13 +44,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import kotlin.collections.ArrayList
-import androidx.recyclerview.widget.RecyclerView
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
-
-// Compose imports
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -65,28 +53,29 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.ComposeView
-
+import com.arashjahani.mappolygonpointsdraw.data.model.LatLng
+import com.arashjahani.mappolygonpointsdraw.utils.getTime
+import android.widget.EditText
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import com.arashjahani.mappolygonpointsdraw.utils.centerOfLatLngPolygon
 @AndroidEntryPoint
-class MapFragment : Fragment(), PolygonsItemClickListener {
+class MapFragment : Fragment() {
 
     companion object {
         private const val TAG = "MapFragment"
         fun newInstance() = MapFragment()
     }
 
-    private val mMapViewModel: MapViewModel by viewModels()
-
+    private val landViewModel: LandViewModel by viewModels()
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
 
     private var mMapView: MapView? = null
-    private var mPointsList = ArrayList<ArrayList<Point>>()
+    private var mPointsList = ArrayList<Point>()
 
     private var mAnnotationApi: AnnotationPlugin? = null
     private var mPolygonAnnotationManager: PolygonAnnotationManager? = null
-
-    private var mSavedPolygonsBottomSheetDialog: BottomSheetDialog? = null
-    private var mSavedPolygonsAdapter: SavedPolygonsAdapter? = null
 
     private lateinit var mFusedLocationClient: FusedLocationProviderClient
     private val firebaseAuth = FirebaseAuth.getInstance()
@@ -95,6 +84,11 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
     private var allowedDistrict: String? = null
     private var allowedProvince: String? = null
     private var allowedCountry: String? = null
+
+    // Compose dialog state
+    private var showAddLandDialog = false
+    private var lastArea: Long = 0L
+    private var lastCoordinates: List<LatLng> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,7 +108,6 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         super.onViewCreated(view, savedInstanceState)
 
         prepareViews()
-        initObservers()
         initListeners()
 
         lifecycleScope.launch {
@@ -124,7 +117,7 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
             }
         }
 
-        // Thêm ComposeView động cho nút login/logout ở góc trên bên phải
+        // ComposeView cho login/logout
         val composeView = ComposeView(requireContext()).apply {
             setContent {
                 val user = FirebaseAuth.getInstance().currentUser
@@ -143,7 +136,32 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
                         onLogoutClick = {
                             FirebaseAuth.getInstance().signOut()
                             Toast.makeText(requireContext(), "Logged out", Toast.LENGTH_SHORT).show()
-                            // Có thể reload lại fragment/activity nếu muốn
+                        }
+                    )
+                }
+                // Dialog nhập thông tin thửa đất
+                if (showAddLandDialog) {
+                    AddLandDialog(
+                        area = lastArea,
+                        onDismiss = { showAddLandDialog = false },
+                        onSave = { ownerName, phone, address, landType ->
+                            val land = LandParcel(
+                                address = address,
+                                registerDate = getTime(),
+                                ownerName = ownerName,
+                                area = lastArea,
+                                landType = landType,
+                                coordinates = lastCoordinates,
+                                phone = phone,
+                                createdBy = firebaseAuth.currentUser?.uid ?: "",
+                                district = allowedDistrict ?: "",
+                                province = allowedProvince ?: "",
+                                country = allowedCountry ?: ""
+                            )
+                            landViewModel.addLand(land)
+                            showAddLandDialog = false
+                            Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT).show()
+                            clearMapView()
                         }
                     )
                 }
@@ -164,39 +182,25 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
                 moveToDistrict(district)
             }
         }
+
+        // Quan sát danh sách thửa đất và vẽ lên map
+        lifecycleScope.launch {
+            landViewModel.fetchLands()
+            landViewModel.lands.collect { lands ->
+                drawAllLands(lands)
+            }
+        }
     }
 
     private fun prepareViews() {
         try {
             mMapView = binding.mapView
-            Log.d(TAG, "MapView initialized")
-
             mMapView?.getMapboxMap()?.loadStyleUri(Style.MAPBOX_STREETS)
-            Log.d(TAG, "Style loaded")
-
             mAnnotationApi = mMapView?.annotations
-            Log.d(TAG, "Annotation API initialized")
-
             mPolygonAnnotationManager = mAnnotationApi?.createPolygonAnnotationManager()
-            Log.d(TAG, "PolygonAnnotationManager created")
-
-            mPointsList.add(ArrayList())
-            loadSavedPolygonsList()
         } catch (e: Exception) {
             Log.e(TAG, "Error in prepareViews: ${e.message}")
             e.printStackTrace()
-        }
-    }
-
-    private fun initObservers() {
-        lifecycleScope.launch {
-            try {
-                mMapViewModel.getAllPolygons().collect {
-                    mSavedPolygonsAdapter?.renewItems(it)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in observer: ${e.message}")
-            }
         }
     }
 
@@ -209,8 +213,8 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
             mMapView?.getMapboxMap()?.cameraState?.center?.let { point ->
                 lifecycleScope.launch {
                     if (isPointInAllowedDistrict(point)) {
-                        mPointsList.first().add(point)
-                        drawPolygon(mPointsList)
+                        mPointsList.add(point)
+                        drawCurrentPolygon()
                     } else {
                         showDistrictWarning()
                     }
@@ -224,7 +228,13 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
                 startActivity(Intent(requireActivity(), LoginActivity::class.java))
                 return@setOnClickListener
             }
-            savePolygon()
+            if (mPointsList.size < 3) {
+                Toast.makeText(requireContext(), "Add at least 3 points to save polygon", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val area = mPointsList.calcPolygonArea()
+            val coordinates = mPointsList.toLatLngList()
+            showAddLandDialog(area, coordinates)
         }
 
         binding.btnDrawPolygon.setOnClickListener {
@@ -245,26 +255,15 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
             binding.layoutMainNavigator.visibility = View.VISIBLE
             clearMapView()
         }
-
-        binding.btnList.setOnClickListener {
-            if (firebaseAuth.currentUser == null) {
-                Toast.makeText(requireContext(), "Please log in to view saved polygons", Toast.LENGTH_SHORT).show()
-                startActivity(Intent(requireActivity(), LoginActivity::class.java))
-                return@setOnClickListener
-            }
-            mSavedPolygonsBottomSheetDialog?.show()
-        }
     }
 
     private suspend fun fetchUserPermissions() {
         val user = firebaseAuth.currentUser ?: return
-
         try {
             val document = firestore.collection("users").document(user.uid).get().await()
             allowedDistrict = document.getString("district")
             allowedProvince = document.getString("province")
             allowedCountry = document.getString("country")
-
             allowedDistrict?.let {
                 Toast.makeText(requireContext(),
                     "You can only draw in $it district",
@@ -282,21 +281,15 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         val user = firebaseAuth.currentUser ?: return false
         val document = firestore.collection("users").document(user.uid).get().await()
         val allowedDistrict = document.getString("district") ?: return true
-
         val district = getDistrictFromLatLngNominatim(point.latitude(), point.longitude())
-        Log.d("DistrictCheck", "Nominatim: '$district', Allowed: '$allowedDistrict'")
-
-        // Loại bỏ tiền tố "Quận", "Huyện", "Thị xã", "Thành phố" nếu có
         fun normalize(s: String?): String =
             s?.replace(Regex("^(Quận|Huyện|Thị xã|Thành phố)\\s*"), "")?.trim() ?: ""
-
         return normalize(district).equals(normalize(allowedDistrict), ignoreCase = true)
                 || normalize(district).contains(normalize(allowedDistrict), ignoreCase = true)
     }
 
     private fun showDistrictWarning() {
-        if (!isAdded) return // Check if Fragment is attached
-
+        if (!isAdded) return
         activity?.runOnUiThread {
             AlertDialog.Builder(requireContext())
                 .setTitle("District Restriction")
@@ -325,36 +318,47 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         }
     }
 
-    private fun savePolygon() {
-        if (mPointsList.first().size < 3) {
-            Toast.makeText(requireContext(), "Add at least 3 points to save polygon", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val area = mPointsList.first().calcPolygonArea()
-        mMapViewModel.savePolygonWithPoints(area, mPointsList.first())
-        Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT).show()
-        clearMapView()
-    }
-
-    private fun drawPolygon(points: List<List<Point>>) {
+    private fun drawCurrentPolygon() {
         try {
             mPolygonAnnotationManager?.deleteAll()
-            val polygonAnnotationOptions = PolygonAnnotationOptions()
-                .withPoints(points)
-                .withFillColor("#ee4e8b")
-                .withFillOpacity(0.4)
-            mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+            if (mPointsList.size > 2) {
+                val polygonAnnotationOptions = PolygonAnnotationOptions()
+                    .withPoints(listOf(mPointsList))
+                    .withFillColor("#ee4e8b")
+                    .withFillOpacity(0.4)
+                mPolygonAnnotationManager?.create(polygonAnnotationOptions)
 
-            points.firstOrNull()?.let {
-                if (it.size > 2) {
-                    drawPolygonCenterMarker(it.centerOfPolygon())
-                    binding.lblArea.visibility = View.VISIBLE
-                    binding.lblArea.text = "Area: ${it.calcPolygonArea().areaFormat()} m²"
+                // Chuyển mPointsList thành List<LatLng>
+                val latLngList = mPointsList.toLatLngList()
+                drawPolygonCenterMarker(latLngList.centerOfLatLngPolygon().toPoint())
+
+                binding.lblArea.visibility = View.VISIBLE
+                binding.lblArea.text = "Diện tích: ${mPointsList.calcPolygonArea().areaFormat()} m²"
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Lỗi khi vẽ đa giác: ${e.message}")
+        }
+    }
+    private fun LatLng.toPoint(): Point {
+        return Point.fromLngLat(this.lng, this.lat)
+    }
+
+    private fun drawAllLands(lands: List<LandParcel>) {
+        try {
+            mPolygonAnnotationManager?.deleteAll()
+            lands.forEach { land ->
+                val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                if (points.size > 2) {
+                    val color = getLandColor(land.landType)
+                    val polygonAnnotationOptions = PolygonAnnotationOptions()
+                        .withPoints(listOf(points))
+                        .withFillColor("#" + color.value.toString(16).takeLast(6))
+                        .withFillOpacity(0.4)
+                    mPolygonAnnotationManager?.create(polygonAnnotationOptions)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error drawing polygon: ${e.message}")
+            Log.e(TAG, "Error drawing all lands: ${e.message}")
         }
     }
 
@@ -375,27 +379,15 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         )
     }
 
-    private fun loadSavedPolygonsList() {
-        if (mSavedPolygonsBottomSheetDialog == null) {
-            mSavedPolygonsBottomSheetDialog = BottomSheetDialog(requireContext())
-            mSavedPolygonsBottomSheetDialog?.setContentView(R.layout.dialog_saved_polygons_list)
-            val rcvSavedPolygons = mSavedPolygonsBottomSheetDialog?.findViewById<RecyclerView>(R.id.rcvSavedPolygons)
-            mSavedPolygonsAdapter = SavedPolygonsAdapter(ArrayList())
-            mSavedPolygonsAdapter?.setListener(this)
-            rcvSavedPolygons?.adapter = mSavedPolygonsAdapter
-        }
-    }
-
     private fun clearMapView() {
         mMapView?.getMapboxMap()?.getStyle()?.removeStyleLayer("flag_layer_id")
         mMapView?.getMapboxMap()?.getStyle()?.removeStyleLayer("position_layer_id")
         mPolygonAnnotationManager?.deleteAll()
-        mPointsList.first().clear()
+        mPointsList.clear()
     }
 
     private fun getUserLocation() {
         val context = context ?: return
-
         if (ActivityCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ACCESS_FINE_LOCATION
@@ -403,7 +395,6 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
             mFusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 if (location != null) {
                     val point = Point.fromLngLat(location.longitude, location.latitude)
-                    // Không kiểm tra district ở đây nữa
                     moveToPosition(point, true)
                 } else {
                     Toast.makeText(requireContext(), "Location data not available", Toast.LENGTH_SHORT).show()
@@ -418,7 +409,6 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
             .center(location)
             .build()
         mMapView?.getMapboxMap()?.setCamera(cameraPosition)
-
         if (showPositionMarker) {
             mMapView?.getMapboxMap()?.loadStyle(
                 styleExtension = style(Style.MAPBOX_STREETS) {
@@ -435,29 +425,6 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
                 }
             )
         }
-    }
-
-    override fun deletePolygon(itemId: Long) {
-        mMapViewModel.deletePolygon(itemId)
-    }
-
-    override fun copyPolygon(item: PolygonWithPoints) {
-        try {
-            val clipboardManager =
-                requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboardManager.setPrimaryClip(ClipData.newPlainText("", item.toCopy()))
-            Toast.makeText(requireContext(), "Copied.", Toast.LENGTH_SHORT).show()
-        } catch (ex: Exception) {
-            Toast.makeText(requireContext(), "Error!", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun displayOnMap(item: PolygonWithPoints) {
-        mSavedPolygonsBottomSheetDialog?.dismiss()
-        val points = ArrayList<List<Point>>()
-        points.add(item.toPointsList())
-        moveToPosition(Point.fromLngLat(item.polygon.centerLng, item.polygon.centerLat))
-        drawPolygon(points)
     }
 
     override fun onStart() {
@@ -480,14 +447,11 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         mPolygonAnnotationManager?.deleteAll()
         mPolygonAnnotationManager = null
         mAnnotationApi = null
-        mSavedPolygonsBottomSheetDialog?.dismiss()
-        mSavedPolygonsBottomSheetDialog = null
         _binding = null
     }
 
     // --- Thêm các hàm suspend ở dưới cùng class ---
 
-    // Hàm tự động di chuyển đến district (gọi trong coroutine)
     private suspend fun moveToDistrict(district: String) {
         val center = getLatLngFromDistrictName(district)
         if (center != null) {
@@ -495,11 +459,10 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
         }
     }
 
-    // Hàm này dùng Nominatim để lấy toạ độ trung tâm district
     private suspend fun getLatLngFromDistrictName(district: String): Point? {
         val url = "https://nominatim.openstreetmap.org/search?format=json&q=${district.replace(" ", "+")}"
-        val client = OkHttpClient()
-        val request = Request.Builder()
+        val client = okhttp3.OkHttpClient()
+        val request = okhttp3.Request.Builder()
             .url(url)
             .header("User-Agent", "YourAppName")
             .build()
@@ -516,31 +479,83 @@ class MapFragment : Fragment(), PolygonsItemClickListener {
             }
         }
     }
-}
+    private fun showAddLandDialog(area: Long, coordinates: List<LatLng>) {
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_add_land, null)
+        val edtOwnerName = dialogView.findViewById<EditText>(R.id.edtOwnerName)
+        val edtPhone = dialogView.findViewById<EditText>(R.id.edtPhone)
+        val spnLandType = dialogView.findViewById<Spinner>(R.id.spnLandType)
 
-// Hàm lấy district từ Nominatim (OpenStreetMap)
+        val adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            listOf("Đất thổ cư", "Đất thổ cảnh", "Loại khác")
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spnLandType.adapter = adapter
+
+        // Lấy địa chỉ tự động từ điểm trung tâm polygon
+        val center = coordinates.centerOfLatLngPolygon()
+        lifecycleScope.launch {
+            val address = getAddressFromLatLng(center.lat, center.lng) ?: "Không xác định"
+            AlertDialog.Builder(requireContext())
+                .setTitle("Nhập thông tin thửa đất")
+                .setView(dialogView)
+                .setPositiveButton("Lưu") { _, _ ->
+                    val land = LandParcel(
+                        address = address,
+                        registerDate = getTime(),
+                        ownerName = edtOwnerName.text.toString(),
+                        area = area,
+                        landType = spnLandType.selectedItemPosition + 1,
+                        coordinates = coordinates,
+                        phone = edtPhone.text.toString(),
+                        createdBy = firebaseAuth.currentUser?.uid ?: "",
+                        district = allowedDistrict ?: "",
+                        province = allowedProvince ?: "",
+                        country = allowedCountry ?: ""
+                    )
+                    landViewModel.addLand(land)
+                    Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT).show()
+                    clearMapView()
+                }
+                .setNegativeButton("Hủy", null)
+                .show()
+        }
+    }
+    private suspend fun getAddressFromLatLng(lat: Double, lng: Double): String? {
+        val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lng"
+        val client = okhttp3.OkHttpClient()
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .header("User-Agent", "YourAppName")
+            .build()
+        return withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: return@withContext null
+                val json = org.json.JSONObject(body)
+                json.optString("display_name")
+            }
+        }
+    }
+}
 suspend fun getDistrictFromLatLngNominatim(lat: Double, lng: Double): String? {
     val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lng"
-    val client = OkHttpClient()
-    val request = Request.Builder()
+    val client = okhttp3.OkHttpClient()
+    val request = okhttp3.Request.Builder()
         .url(url)
         .header("User-Agent", "YourAppName")
         .build()
     return withContext(Dispatchers.IO) {
         client.newCall(request).execute().use { response ->
             val body = response.body?.string() ?: return@withContext null
-            val json = JSONObject(body)
+            val json = org.json.JSONObject(body)
             val address = json.optJSONObject("address")
-            Log.d("NominatimRaw", json.toString())
-            // Trả về tất cả các trường có thể
             val fields = listOf("county", "district", "suburb", "city_district", "state_district", "region", "quarter")
             fields.mapNotNull { address?.optString(it) }
                 .firstOrNull { it.isNotBlank() }
         }
     }
 }
-
-// Composable cho nút login/logout
 @Composable
 fun LoginButton(
     isLoggedIn: Boolean,
