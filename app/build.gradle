@@ -12,12 +12,12 @@ def apikeyProperties = new Properties()
 apikeyProperties.load(new FileInputStream(apikeyPropertiesFile))
 
 android {
-    namespace 'com.arashjahani.mappolygonpointsdraw'
+    namespace 'com.hung.landplanggmap'
     compileSdk 34
     buildToolsVersion '34.0.0'
 
     defaultConfig {
-        applicationId "com.arashjahani.mappolygonpointsdraw"
+        applicationId "com.hung.landplanggmap"
         minSdk 24
         targetSdk 33
         versionCode 1
@@ -92,12 +92,13 @@ dependencies {
     implementation 'com.mapbox.common:common:23.3.1'
     implementation 'com.squareup.okhttp3:okhttp:4.9.1'
     implementation 'org.locationtech.jts:jts-core:1.19.0'
+    implementation 'com.google.firebase:firebase-firestore:25.1.4'
     apply plugin: 'com.google.gms.google-services'
     // Location
     implementation 'com.google.android.gms:play-services-location:21.0.1'
 
     // Firebase
-    implementation platform('com.google.firebase:firebase-bom:32.7.0')
+    implementation platform('com.google.firebase:firebase-bom:33.16.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore-ktx'
 

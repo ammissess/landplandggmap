@@ -62,6 +62,43 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:206684829355:android:740c6452e31e3ec9e6a9ee",
+        "android_client_info": {
+          "package_name": "com.hung.landplanggmap"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "206684829355-mklprf04seq994ntgj5frp11r343n6rq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.hung.landplanggmap",
+            "certificate_hash": "44e6e8f7278902f054a50fd1c162f13809337294"
+          }
+        },
+        {
+          "client_id": "206684829355-m8v4k7rlopdgot6ovikbe5m37tf4h3pm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoMC1kqBfHsTJJxGE0CyYqysDB52aS9ro"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "206684829355-m8v4k7rlopdgot6ovikbe5m37tf4h3pm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

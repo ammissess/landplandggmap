@@ -12,11 +12,12 @@ buildscript {
         //classpath "org.jetbrains.kotlin:kotlin-android-extensions:$kotlin_version"
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath 'com.google.dagger:hilt-android-gradle-plugin:2.48'
-        classpath 'com.google.gms:google-services:4.4.2'
+        classpath 'com.google.gms:google-services:4.4.3'
 
 
     }
 }
+
 
 allprojects {
     repositories {
@@ -47,6 +48,7 @@ allprojects {
         }
     }
 }
+
 
 task clean(type: Delete) {
     delete rootProject.buildDir
