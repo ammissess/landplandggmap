@@ -5,6 +5,7 @@ plugins {
     id 'kotlin-kapt'
     id 'dagger.hilt.android.plugin'
     id 'com.google.gms.google-services'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.0'
 }
 
 def apikeyPropertiesFile = rootProject.file("gradle.properties")
@@ -22,10 +23,9 @@ android {
         targetSdk 33
         versionCode 1
         versionName "1.0"
-
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        // Thêm cấu hình cho Mapbox
+        // Mapbox token
         resValue 'string', 'mapbox_access_token', apikeyProperties['MAPBOX_DOWNLOADS_TOKEN']
     }
 
@@ -43,22 +43,26 @@ android {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
+
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = "11"
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
 
     buildFeatures {
         viewBinding true
         compose true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.13"
-    }
+
 
     lint {
         abortOnError false
         checkReleaseBuilds false
     }
+
     packagingOptions {
         pickFirst 'lib/x86/libc++_shared.so'
         pickFirst 'lib/x86_64/libc++_shared.so'
@@ -72,7 +76,8 @@ hilt {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    // Kotlin
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
     // AndroidX
     implementation 'androidx.core:core-ktx:1.9.0'
@@ -83,21 +88,18 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2'
 
-
     // Mapbox
     implementation 'com.mapbox.maps:android:10.16.1'
+    implementation 'com.mapbox.common:common:23.3.1'
+    implementation 'org.locationtech.jts:jts-core:1.19.0'
+
+    // Networking
     implementation 'com.squareup.okhttp3:okhttp:4.9.1'
 
-    // Thêm các dependencies này
-    implementation 'com.mapbox.common:common:23.3.1'
-    implementation 'com.squareup.okhttp3:okhttp:4.9.1'
-    implementation 'org.locationtech.jts:jts-core:1.19.0'
-    implementation 'com.google.firebase:firebase-firestore:25.1.4'
-    apply plugin: 'com.google.gms.google-services'
     // Location
     implementation 'com.google.android.gms:play-services-location:21.0.1'
 
-    // Firebase
+    // Firebase (BOM giúp quản lý version đồng bộ)
     implementation platform('com.google.firebase:firebase-bom:33.16.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore-ktx'
@@ -114,6 +116,7 @@ dependencies {
     implementation "androidx.compose.material3:material3:1.2.0"
     implementation "androidx.compose.material:material-icons-extended:1.6.0"
     implementation "androidx.activity:activity-compose:1.8.0"
+
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.1'

@@ -30,8 +30,9 @@ import com.hung.landplanggmap.MainActivity
 import com.hung.landplanggmap.ui.map.theme.MapPolygonPointsDrawTheme
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.material3.*
-import com.arashjahani.mappolygonpointsdraw.R
+//import com.arashjahani.mappolygonpointsdraw.R
 import com.google.firebase.firestore.FirebaseFirestore
+import com.hung.landplanggmap.R
 
 class LoginActivity : ComponentActivity() {
 
