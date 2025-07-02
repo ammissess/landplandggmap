@@ -26,6 +26,6 @@
 //    }
 //}
 
-rootProject.name = "MapPolygonPointsDraw"
+rootProject.name = "LandMap"
 include ':app'
 

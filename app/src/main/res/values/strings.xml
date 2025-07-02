@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">MapPolygonPointsDraw</string>
+    <string name="app_name">LandMap</string>
     <string name="hint_owner_name">Tên chủ đất</string>
     <string name="hint_phone">Số điện thoại</string>
 </resources>
