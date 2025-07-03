@@ -114,6 +114,7 @@ class MapFragment : Fragment() {
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
+
         super.onCreate(savedInstanceState)
         mFusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
     }
