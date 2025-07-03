@@ -1,6 +1,7 @@
 package com.hung.landplanggmap.ui.map
 
 import android.Manifest
+import android.app.Dialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -63,9 +64,17 @@ import com.hung.landplanggmap.utils.centerOfLatLngPolygon
 import com.hung.landplanggmap.utils.isPolygonIntersect
 import com.hung.landplanggmap.ui.map.theme.getLandColorHex
 import android.content.Context
+import android.graphics.Color
+import android.view.Gravity
 import androidx.core.content.ContextCompat
 import com.hung.landplanggmap.R
 import com.hung.landplanggmap.databinding.FragmentMapBinding
+import com.mapbox.maps.plugin.gestures.addOnMapClickListener
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 
 @AndroidEntryPoint
 class MapFragment : Fragment() {
@@ -77,6 +86,7 @@ class MapFragment : Fragment() {
 
     //đếm lần click nút chỉ định
     private var clickCount = 0
+
     //nút bật tắt vùng quy hoạch
     private var isLandsVisible = false
     private val RED_DARK_COLOR = "#FF0000" // Màu đỏ đậm (Hex code)
@@ -128,6 +138,8 @@ class MapFragment : Fragment() {
         return binding.root
     }
 
+
+    //view được tạo bởi polygon
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -160,7 +172,8 @@ class MapFragment : Fragment() {
                         },
                         onLogoutClick = {
                             FirebaseAuth.getInstance().signOut()
-                            Toast.makeText(requireContext(), "Logged out", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), "Logged out", Toast.LENGTH_SHORT)
+                                .show()
                         }
                     )
                 }
@@ -185,7 +198,8 @@ class MapFragment : Fragment() {
                             )
                             landViewModel.addLand(land)
                             showAddLandDialog = false
-                            Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT)
+                                .show()
                             clearMapView()
                         }
                     )
@@ -214,8 +228,120 @@ class MapFragment : Fragment() {
             landViewModel.lands.collect { lands ->
                 drawAllLands(lands)
                 mSavedPolygonsAdapter?.renewItems(lands)
+
+                // Thêm sự kiện click trên map , xác định polygon bằng tọa độ click
+                mMapView?.getMapboxMap()?.addOnMapClickListener { point ->
+                    val annotations =
+                        mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                    annotations?.forEach { annotation ->
+                        if (annotation.geometry is Polygon) {
+                            val polygon = annotation.geometry as Polygon
+                            val coordinates = polygon.coordinates().first()
+                            val isClickedInside = isPointInPolygon(
+                                point,
+                                coordinates.map { Point.fromLngLat(it.longitude(), it.latitude()) }
+                            )
+
+                            if (isClickedInside) {
+                                val clickedLand = lands.find { land ->
+                                    val landPoints =
+                                        land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                                    landPoints.size == coordinates.size && coordinates.containsAll(
+                                        landPoints
+                                    )
+                                }
+
+                                clickedLand?.let { land ->
+                                    // Gọi nháy xong mới hiện dialog
+                                    lifecycleScope.launch {
+                                        flashPolygon(annotation)
+                                        showLandDetailDialog(land)
+                                    }
+                                    return@addOnMapClickListener true
+                                }
+                            }
+                        }
+                    }
+                    false
+                }
+
+
             }
         }
+    }
+
+    // Cập nhật phương thức moveToPosition, zoom màn hình bản đồ
+    private fun moveToPosition(location: Point, showPositionMarker: Boolean = false, zoomLevel: Double = 17.0) {
+        val cameraPosition = CameraOptions.Builder()
+            .zoom(zoomLevel) // Đặt zoom level khoảng 17.0 cho khoảng 100 feet
+            .center(location)
+            .build()
+        mMapView?.getMapboxMap()?.setCamera(cameraPosition)
+        if (showPositionMarker) {
+            mMapView?.getMapboxMap()?.loadStyle(
+                styleExtension = style(Style.MAPBOX_STREETS) {
+                    +image("ic_position") {
+                        bitmap(BitmapFactory.decodeResource(resources, R.drawable.ic_place))
+                    }
+                    +geoJsonSource("position_source_id") {
+                        geometry(location)
+                    }
+                    +symbolLayer("position_layer_id", "position_source_id") {
+                        iconImage("ic_position")
+                        iconAnchor(IconAnchor.BOTTOM)
+                    }
+                }
+            )
+        }
+    }
+
+    //hàm chớp nháy màu mảnh đất
+    private suspend fun flashPolygon(annotation: PolygonAnnotation) {
+        val originalColor = annotation.fillColorInt ?: Color.GREEN // fallback màu gốc nếu null
+        val highlightColor = Color.BLACK
+        val originalOpacity = annotation.fillOpacity ?: 0.4
+
+        repeat(2) {
+            // Tạo polygon nháy
+            val updated = PolygonAnnotationOptions()
+                .withPoints(annotation.points)
+                .withFillColor(highlightColor)
+                .withFillOpacity(originalOpacity)
+
+            val tempAnnotation = mPolygonAnnotationManager?.create(updated)
+            delay(250)
+
+            // Xóa polygon nháy
+            tempAnnotation?.let { mPolygonAnnotationManager?.delete(it) }
+
+            // Vẽ lại polygon gốc với màu ban đầu
+            val original = PolygonAnnotationOptions()
+                .withPoints(annotation.points)
+                .withFillColor(originalColor)
+                .withFillOpacity(originalOpacity)
+
+            mPolygonAnnotationManager?.create(original)
+            delay(250)
+        }
+    }
+
+
+    // Hàm kiểm tra xem điểm có nằm trong polygon không
+    private fun isPointInPolygon(point: Point, polygonPoints: List<Point>): Boolean {
+        var inside = false
+        var j = polygonPoints.size - 1
+        for (i in 0 until polygonPoints.size) {
+            val xi = polygonPoints[i].longitude()
+            val yi = polygonPoints[i].latitude()
+            val xj = polygonPoints[j].longitude()
+            val yj = polygonPoints[j].latitude()
+
+            val intersect = ((yi > point.latitude()) != (yj > point.latitude())) &&
+                    (point.longitude() < (xj - xi) * (point.latitude() - yi) / (yj - yi) + xi)
+            if (intersect) inside = !inside
+            j = i
+        }
+        return inside
     }
 
     private fun prepareViews() {
@@ -242,15 +368,25 @@ class MapFragment : Fragment() {
                     if (userLands.isNotEmpty()) {
                         // Chỉ xóa mảnh đất đã lưu, không ảnh hưởng mảnh đất tạm
                         if (!isLandsVisible) {
-                            val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                            val existingAnnotations =
+                                mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
                             if (existingAnnotations != null) {
                                 val savedAnnotations = existingAnnotations.filter { annotation ->
                                     userLands.any { land ->
-                                        val landPoints = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                                        val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.get(0)?.map {
-                                            Point.fromLngLat(it.longitude(), it.latitude())
-                                        } ?: emptyList()
-                                        landPoints.size == annotationPoints.size && landPoints.containsAll(annotationPoints)
+                                        val landPoints = land.coordinates.map {
+                                            Point.fromLngLat(
+                                                it.lng,
+                                                it.lat
+                                            )
+                                        }
+                                        val annotationPoints =
+                                            (annotation.geometry as? Polygon)?.coordinates()?.get(0)
+                                                ?.map {
+                                                    Point.fromLngLat(it.longitude(), it.latitude())
+                                                } ?: emptyList()
+                                        landPoints.size == annotationPoints.size && landPoints.containsAll(
+                                            annotationPoints
+                                        )
                                     }
                                 }
                                 if (savedAnnotations.isNotEmpty()) {
@@ -261,7 +397,8 @@ class MapFragment : Fragment() {
                         if (isLandsVisible) {
                             mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
                             userLands.forEach { land ->
-                                val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                                val points =
+                                    land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
                                 if (points.size > 2) {
                                     val colorHex = getLandColorHex(land.landType)
                                     val polygonAnnotationOptions = PolygonAnnotationOptions()
@@ -274,9 +411,17 @@ class MapFragment : Fragment() {
                         }
                         // Luôn vẽ lại mảnh đất tạm, không bị xóa
                         drawCurrentPolygon()
-                        Toast.makeText(requireContext(), "Hiển thị mảnh đất của bạn", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            requireContext(),
+                            "Hiển thị mảnh đất của bạn",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     } else {
-                        Toast.makeText(requireContext(), "Bạn chưa có mảnh đất nào", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            requireContext(),
+                            "Bạn chưa có mảnh đất nào",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             }
@@ -297,12 +442,20 @@ class MapFragment : Fragment() {
 
         binding.btnSavePolygon.setOnClickListener {
             if (firebaseAuth.currentUser == null) {
-                Toast.makeText(requireContext(), "Login để thực hiện quy hoạch đất trên bản đồ", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    requireContext(),
+                    "Login để thực hiện quy hoạch đất trên bản đồ",
+                    Toast.LENGTH_SHORT
+                ).show()
                 startActivity(Intent(requireActivity(), LoginActivity::class.java))
                 return@setOnClickListener
             }
             if (mPointsList.size < 3) {
-                Toast.makeText(requireContext(), "Cần ít nhất 3 điểm để quy hoạch mảnh đất", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    requireContext(),
+                    "Cần ít nhất 3 điểm để quy hoạch mảnh đất",
+                    Toast.LENGTH_SHORT
+                ).show()
                 return@setOnClickListener
             }
             val area = mPointsList.calcPolygonArea()
@@ -311,7 +464,11 @@ class MapFragment : Fragment() {
             val oldPolygons = landViewModel.lands.value.map { it.coordinates }
 
             if (isPolygonIntersect(coordinates, oldPolygons)) {
-                Toast.makeText(requireContext(), "Mảnh đất bị chồng lấn với mảnh khác!", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    requireContext(),
+                    "Mảnh đất bị chồng lấn với mảnh khác!",
+                    Toast.LENGTH_LONG
+                ).show()
                 return@setOnClickListener
             }
 
@@ -324,7 +481,11 @@ class MapFragment : Fragment() {
 
         binding.btnDrawPolygon.setOnClickListener {
             if (firebaseAuth.currentUser == null) {
-                Toast.makeText(requireContext(), "Login để thực hiện quy hoạch đất trên bản đồ", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    requireContext(),
+                    "Login để thực hiện quy hoạch đất trên bản đồ",
+                    Toast.LENGTH_SHORT
+                ).show()
                 startActivity(Intent(requireActivity(), LoginActivity::class.java))
                 return@setOnClickListener
             }
@@ -347,21 +508,71 @@ class MapFragment : Fragment() {
         }
 
 
-        //nut tim kiem
+
+// Sự kiện nhấn vào biểu tượng tìm kiếm (chỉ tìm kiếm địa điểm trong allowedDistrict)
+        binding.ivSearchIcon.setOnClickListener {
+            val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search_new, null)
+            val searchEditText = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edtSearchNew)
+            val textInputLayout = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.textInputLayout)
+
+            val dialog = Dialog(requireContext(), R.style.CustomDialogAnimation)
+            dialog.setContentView(dialogView)
+            val displayMetrics = resources.displayMetrics
+            val height = (displayMetrics.heightPixels * 0.2).toInt() // Đặt chiều cao cố định 25%
+            //dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) // Full chiều rộng
+            dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, height)
+            dialog.window?.setGravity(Gravity.TOP)
+            dialog.window?.setBackgroundDrawable(null) // Loại bỏ nền mặc định để bo góc hiển thị
+
+            textInputLayout?.setEndIconOnClickListener {
+                val searchText = searchEditText?.text?.toString()?.trim() ?: ""
+                if (searchText.isNotEmpty()) {
+                    lifecycleScope.launch {
+                        val location = searchLocation(searchText)
+                        if (location != null) {
+                            val point = Point.fromLngLat(location.longitude(), location.latitude())
+                            if (isPointInAllowedDistrict(point)) {
+                                moveToPosition(point, true, 17.0)
+                                Toast.makeText(requireContext(), "Đã tìm thấy: $searchText", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(requireContext(), "Ngoài phạm vi tìm kiếm, không được phép!", Toast.LENGTH_LONG).show()
+                            }
+                        } else {
+                            Toast.makeText(requireContext(), "Không tìm thấy địa điểm: $searchText", Toast.LENGTH_SHORT).show()
+                        }
+                        dialog.dismiss()
+                    }
+                } else {
+                    Toast.makeText(requireContext(), "Vui lòng nhập địa điểm!", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            dialog.show()
+        }
+
+
+        //nut Loc ket qua quyhoach dat
         binding.btnSearchh.setOnClickListener {
-            val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search, null)
-            val searchEditText = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edtSearch)
-            val searchButton = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnSearchDialog)
-            val cancelButton = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCancelDialog)
+            val dialogView =
+                LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search, null)
+            val searchEditText =
+                dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edtSearch)
+            val searchButton =
+                dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnSearchDialog)
+            val cancelButton =
+                dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCancelDialog)
 
             val dialog = BottomSheetDialog(requireContext(), R.style.CustomBottomSheetDialog)
             dialog.setContentView(dialogView)
-            val bottomSheet = dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
-            bottomSheet?.background = ContextCompat.getDrawable(requireContext(), R.drawable.bg_rounded_dialog)
+            val bottomSheet =
+                dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
+            bottomSheet?.background =
+                ContextCompat.getDrawable(requireContext(), R.drawable.bg_rounded_dialog)
 
             searchButton.setOnClickListener {
                 val searchText = searchEditText.text.toString()
-                Toast.makeText(requireContext(), "Searching for: $searchText", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Searching for: $searchText", Toast.LENGTH_SHORT)
+                    .show()
                 dialog.dismiss()
             }
 
@@ -376,9 +587,14 @@ class MapFragment : Fragment() {
             lifecycleScope.launch {
                 allowedDistrict?.let { district ->
                     moveToDistrict(district)
-                    Toast.makeText(requireContext(), "Di chuyển đến $district", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Di chuyển đến $district", Toast.LENGTH_SHORT)
+                        .show()
                 } ?: run {
-                    Toast.makeText(requireContext(), "Không tìm thấy khu vực được phép", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        "Không tìm thấy khu vực được phép",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
@@ -406,18 +622,23 @@ class MapFragment : Fragment() {
                 binding.fabToggleLands.setImageResource(R.drawable.ic_toggle_on)
                 //Toast.makeText(requireContext(), "Hiển thị mảnh đất của bạn", Toast.LENGTH_SHORT).show()
             } else {
-                val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                val existingAnnotations =
+                    mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
                 if (existingAnnotations != null) {
                     val userId = firebaseAuth.currentUser?.uid
                     if (userId != null) {
                         val userLands = landViewModel.lands.value.filter { it.createdBy == userId }
                         val savedAnnotations = existingAnnotations.filter { annotation ->
                             userLands.any { land ->
-                                val landPoints = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                                val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.get(0)?.map {
-                                    Point.fromLngLat(it.longitude(), it.latitude())
-                                } ?: emptyList()
-                                landPoints.size == annotationPoints.size && landPoints.containsAll(annotationPoints)
+                                val landPoints =
+                                    land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                                val annotationPoints =
+                                    (annotation.geometry as? Polygon)?.coordinates()?.get(0)?.map {
+                                        Point.fromLngLat(it.longitude(), it.latitude())
+                                    } ?: emptyList()
+                                landPoints.size == annotationPoints.size && landPoints.containsAll(
+                                    annotationPoints
+                                )
                             }
                         }
                         if (savedAnnotations.isNotEmpty()) {
@@ -436,74 +657,89 @@ class MapFragment : Fragment() {
         if (mSavedPolygonsBottomSheetDialog == null) {
             mSavedPolygonsBottomSheetDialog = BottomSheetDialog(requireContext())
             mSavedPolygonsBottomSheetDialog?.setContentView(R.layout.dialog_saved_polygons_list)
-            val rcvSavedPolygons = mSavedPolygonsBottomSheetDialog?.findViewById<RecyclerView>(R.id.rcvSavedPolygons)
-            mSavedPolygonsAdapter = SavedPolygonsAdapter(ArrayList(), object : LandItemClickListener {
+            val rcvSavedPolygons =
+                mSavedPolygonsBottomSheetDialog?.findViewById<RecyclerView>(R.id.rcvSavedPolygons)
+            mSavedPolygonsAdapter =
+                SavedPolygonsAdapter(ArrayList(), object : LandItemClickListener {
 
 
-                override fun deleteLand(land: LandParcel) {
-                    lifecycleScope.launch {
-                        val db = FirebaseFirestore.getInstance()
-                        val query = db.collection("lands")
-                            .whereEqualTo("createdBy", land.createdBy)
-                            .whereEqualTo("registerDate", land.registerDate)
-                            .get()
-                            .await()
-                        for (doc in query.documents) {
-                            doc.reference.delete()
-                        }
-                        Toast.makeText(requireContext(), "Đã xóa thửa đất!", Toast.LENGTH_SHORT).show()
-                        landViewModel.fetchLands()
-                    }
-                }
-
-                override fun copyLand(land: LandParcel) {
-                    val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val text = "Tên chủ đất: ${land.ownerName}\nDiện tích: ${land.area}\nLoại đất: ${land.landType}\nTọa độ: ${land.coordinates.joinToString()}"
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Land Info", text))
-                    Toast.makeText(requireContext(), "Đã copy thông tin!", Toast.LENGTH_SHORT).show()
-                }
-
-                override fun displayOnMap(land: LandParcel) {
-                    showLandDetailDialog(land)
-                }
-
-                override fun onDisplayPolygon(land: LandParcel) {
-                    lifecycleScope.launch {
-                        // Ẩn BottomSheetDialog
-                        mSavedPolygonsBottomSheetDialog?.dismiss()
-
-                        mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
-                        val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                        if (points.size > 2) {
-                            val colorHex = getLandColorHex(land.landType)
-                            val polygonAnnotationOptions = PolygonAnnotationOptions()
-                                .withPoints(listOf(points))
-                                .withFillColor(colorHex)
-                                .withFillOpacity(0.4)
-                            mPolygonAnnotationManager?.create(polygonAnnotationOptions)
-
-                            // Lấy trung tâm của polygon
-                            val center = land.coordinates.centerOfLatLngPolygon().toPoint()
-
-                            // Lấy mức zoom hiện tại và di chuyển camera mà không thay đổi zoom
-                            val currentCameraState = mMapView?.getMapboxMap()?.cameraState
-                            if (currentCameraState != null) {
-                                val cameraOptions = CameraOptions.Builder()
-                                    .center(center)
-                                    .zoom(currentCameraState.zoom) // Giữ nguyên mức zoom hiện tại
-                                    .build()
-                                mMapView?.getMapboxMap()?.setCamera(cameraOptions)
+                    override fun deleteLand(land: LandParcel) {
+                        lifecycleScope.launch {
+                            val db = FirebaseFirestore.getInstance()
+                            val query = db.collection("lands")
+                                .whereEqualTo("createdBy", land.createdBy)
+                                .whereEqualTo("registerDate", land.registerDate)
+                                .get()
+                                .await()
+                            for (doc in query.documents) {
+                                doc.reference.delete()
                             }
-
-                            Toast.makeText(requireContext(), "Hiển thị mảnh đất của ${land.ownerName}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), "Đã xóa thửa đất!", Toast.LENGTH_SHORT)
+                                .show()
+                            landViewModel.fetchLands()
                         }
-                        // Vẽ lại mảnh đất tạm nếu có
-                        drawCurrentPolygon()
                     }
-                }
+
+                    override fun copyLand(land: LandParcel) {
+                        val clipboard =
+                            requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val text =
+                            "Tên chủ đất: ${land.ownerName}\nDiện tích: ${land.area}\nLoại đất: ${land.landType}\nTọa độ: ${land.coordinates.joinToString()}"
+                        clipboard.setPrimaryClip(
+                            android.content.ClipData.newPlainText(
+                                "Land Info",
+                                text
+                            )
+                        )
+                        Toast.makeText(requireContext(), "Đã copy thông tin!", Toast.LENGTH_SHORT)
+                            .show()
+                    }
+
+                    override fun displayOnMap(land: LandParcel) {
+                        showLandDetailDialog(land)
+                    }
+
+                    override fun onDisplayPolygon(land: LandParcel) {
+                        lifecycleScope.launch {
+                            // Ẩn BottomSheetDialog
+                            mSavedPolygonsBottomSheetDialog?.dismiss()
+
+                            mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
+                            val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                            if (points.size > 2) {
+                                val colorHex = getLandColorHex(land.landType)
+                                val polygonAnnotationOptions = PolygonAnnotationOptions()
+                                    .withPoints(listOf(points))
+                                    .withFillColor(colorHex)
+                                    .withFillOpacity(0.4)
+                                mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+
+                                // Lấy trung tâm của polygon
+                                val center = land.coordinates.centerOfLatLngPolygon().toPoint()
+
+                                // Lấy mức zoom hiện tại và di chuyển camera mà không thay đổi zoom
+                                val currentCameraState = mMapView?.getMapboxMap()?.cameraState
+                                if (currentCameraState != null) {
+                                    val cameraOptions = CameraOptions.Builder()
+                                        .center(center)
+                                        .zoom(currentCameraState.zoom) // Giữ nguyên mức zoom hiện tại
+                                        .build()
+                                    mMapView?.getMapboxMap()?.setCamera(cameraOptions)
+                                }
+
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Hiển thị mảnh đất của ${land.ownerName}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            // Vẽ lại mảnh đất tạm nếu có
+                            drawCurrentPolygon()
+                        }
+                    }
 
 
-            })
+                })
             rcvSavedPolygons?.adapter = mSavedPolygonsAdapter
         }
     }
@@ -517,14 +753,16 @@ class MapFragment : Fragment() {
             allowedCountry = document.getString("country")
             allowedDistrict?.let {
                 //Toast.makeText(requireContext(),
-                   // "Bạn chỉ có quyền vẽ đường quy hoạch tại địa điểm Quận/Huyện: $it ",
-                    //Toast.LENGTH_LONG).show()
+                // "Bạn chỉ có quyền vẽ đường quy hoạch tại địa điểm Quận/Huyện: $it ",
+                //Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch user permissions", e)
-            Toast.makeText(requireContext(),
+            Toast.makeText(
+                requireContext(),
                 "Failed to load district restrictions",
-                Toast.LENGTH_SHORT).show()
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -568,15 +806,21 @@ class MapFragment : Fragment() {
             }
         }
     }
+
     //ve tam thoi manh dat them moi
     private fun drawCurrentPolygon() {
         try {
             // Chỉ xóa mảnh đất tạm cũ, không ảnh hưởng mảnh đất đã lưu
-            val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+            val existingAnnotations =
+                mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
             if (existingAnnotations != null) {
                 val annotationsToDelete = existingAnnotations.filter { annotation ->
-                    val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.firstOrNull() ?: emptyList()
-                    annotationPoints.size == mPointsList.size && annotationPoints.containsAll(mPointsList)
+                    val annotationPoints =
+                        (annotation.geometry as? Polygon)?.coordinates()?.firstOrNull()
+                            ?: emptyList()
+                    annotationPoints.size == mPointsList.size && annotationPoints.containsAll(
+                        mPointsList
+                    )
                 }
                 if (annotationsToDelete.isNotEmpty()) {
                     mPolygonAnnotationManager?.delete(annotationsToDelete)
@@ -609,13 +853,19 @@ class MapFragment : Fragment() {
     private fun drawAllLands(lands: List<LandParcel>) {
         try {
             if (isLandsVisible) {
-                val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                val existingAnnotations =
+                    mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
                 if (existingAnnotations != null) {
                     val savedAnnotations = existingAnnotations.filter { annotation ->
-                        val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.firstOrNull() ?: emptyList()
+                        val annotationPoints =
+                            (annotation.geometry as? Polygon)?.coordinates()?.firstOrNull()
+                                ?: emptyList()
                         lands.any { land ->
-                            val landPoints = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                            annotationPoints.size == landPoints.size && annotationPoints.containsAll(landPoints)
+                            val landPoints =
+                                land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                            annotationPoints.size == landPoints.size && annotationPoints.containsAll(
+                                landPoints
+                            )
                         }
                     }
                     if (savedAnnotations.isNotEmpty()) {
@@ -662,31 +912,39 @@ class MapFragment : Fragment() {
     // Thêm hàm hiển thị popup
     private fun showLandDetailDialog(land: LandParcel) {
         selectedLand = land
-        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_land_detail, null)
+        val dialogView =
+            LayoutInflater.from(requireContext()).inflate(R.layout.dialog_land_detail, null)
         val dialog = BottomSheetDialog(requireContext())
         dialog.setContentView(dialogView)
 
         // Gán giá trị cho các TextView
-        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvOwnerName).text = "Tên chủ sở hữu: ${land.ownerName}"
-        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvArea).text = "Diện tích: ${land.area} m²"
-        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvPhone).text = "Số điện thoại: ${land.phone}"
-        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvAddress).text = "Địa chỉ: ${land.address}"
-        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvRegisterDate).text = "Ngày đăng ký: ${land.registerDate}"
+        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvOwnerName).text =
+            "Tên chủ sở hữu: ${land.ownerName}"
+        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvArea).text =
+            "Diện tích: ${land.area} m²"
+        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvPhone).text =
+            "Số điện thoại: ${land.phone}"
+        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvAddress).text =
+            "Địa chỉ: ${land.address}"
+        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvRegisterDate).text =
+            "Ngày đăng ký: ${land.registerDate}"
 
-        // Thiết lập chiều cao 70% màn hình bằng cách điều chỉnh BottomSheet
+        // Thiết lập chiều cao 40% màn hình bằng cách điều chỉnh BottomSheet
         val displayMetrics = resources.displayMetrics
-        val height = (displayMetrics.heightPixels * 0.7).toInt()
-        val layoutParams = dialogView.layoutParams as? ViewGroup.MarginLayoutParams ?: ViewGroup.MarginLayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            height
-        )
+        val height = (displayMetrics.heightPixels * 0.5).toInt()
+        val layoutParams = dialogView.layoutParams as? ViewGroup.MarginLayoutParams
+            ?: ViewGroup.MarginLayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                height
+            )
         layoutParams.height = height
         dialogView.layoutParams = layoutParams
 
         // Nút đóng
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnClosee).setOnClickListener {
-            dialog.dismiss()
-        }
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnClosee)
+            .setOnClickListener {
+                dialog.dismiss()
+            }
 
         dialog.show()
     }
@@ -705,17 +963,59 @@ class MapFragment : Fragment() {
         if (ActivityCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED) {
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             mFusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 if (location != null) {
                     val point = Point.fromLngLat(location.longitude, location.latitude)
                     moveToPosition(point, true)
                 } else {
-                    Toast.makeText(requireContext(), "Dữ liệu vị trí không hợp lệ", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        "Dữ liệu vị trí không hợp lệ",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
     }
+
+    //cái này là zoom khi sur dung tim kiem dia diem
+    private fun moveToPosition2(location: Point, showPositionMarker: Boolean = false) {
+        val mapboxMap = mMapView?.getMapboxMap() ?: return
+
+        if (showPositionMarker) {
+            mapboxMap.loadStyle(
+                styleExtension = style(Style.MAPBOX_STREETS) {
+                    +image("ic_position") {
+                        bitmap(BitmapFactory.decodeResource(resources, R.drawable.ic_place))
+                    }
+                    +geoJsonSource("position_source_id") {
+                        geometry(location)
+                    }
+                    +symbolLayer("position_layer_id", "position_source_id") {
+                        iconImage("ic_position")
+                        iconAnchor(IconAnchor.BOTTOM)
+                    }
+                }
+            ) {
+                // ✅ Đặt camera sau khi style đã load xong
+                val cameraPosition = CameraOptions.Builder()
+                    .zoom(17.0) // zoom to rõ vị trí
+                    .center(location)
+                    .build()
+                mapboxMap.setCamera(cameraPosition)
+            }
+        } else {
+            // ✅ Nếu không cần marker, vẫn zoom bình thường
+            val cameraPosition = CameraOptions.Builder()
+                .zoom(17.0)
+                .center(location)
+                .build()
+            mapboxMap.setCamera(cameraPosition)
+        }
+    }
+
 
     private fun moveToPosition(location: Point, showPositionMarker: Boolean = false) {
         val cameraPosition = CameraOptions.Builder()
@@ -766,6 +1066,37 @@ class MapFragment : Fragment() {
 
     // --- Thêm các hàm suspend ở dưới cùng class ---
 
+    private suspend fun searchLocation(query: String): Point? {
+        val url = "https://nominatim.openstreetmap.org/search?format=json&q=${
+            query.replace(
+                " ",
+                "+"
+            )
+        }&addressdetails=1"
+        val client = okhttp3.OkHttpClient()
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .header("User-Agent", "YourAppName")
+            .build()
+        return withContext(Dispatchers.IO) {
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: return@withContext null
+                    val arr = org.json.JSONArray(body)
+                    if (arr.length() > 0) {
+                        val obj = arr.getJSONObject(0)
+                        val lat = obj.getDouble("lat")
+                        val lon = obj.getDouble("lon")
+                        Point.fromLngLat(lon, lat)
+                    } else null
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error searching location: ${e.message}")
+                null
+            }
+        }
+    }
+
     private suspend fun moveToDistrict(district: String) {
         val center = getLatLngFromDistrictName(district)
         if (center != null) {
@@ -774,7 +1105,8 @@ class MapFragment : Fragment() {
     }
 
     private suspend fun getLatLngFromDistrictName(district: String): Point? {
-        val url = "https://nominatim.openstreetmap.org/search?format=json&q=${district.replace(" ", "+")}"
+        val url =
+            "https://nominatim.openstreetmap.org/search?format=json&q=${district.replace(" ", "+")}"
         val client = okhttp3.OkHttpClient()
         val request = okhttp3.Request.Builder()
             .url(url)
@@ -793,8 +1125,10 @@ class MapFragment : Fragment() {
             }
         }
     }
+
     private fun showAddLandDialog(area: Long, coordinates: List<LatLng>) {
-        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_add_land, null)
+        val dialogView =
+            LayoutInflater.from(requireContext()).inflate(R.layout.dialog_add_land, null)
         val edtOwnerName = dialogView.findViewById<EditText>(R.id.edtOwnerName)
         val edtPhone = dialogView.findViewById<EditText>(R.id.edtPhone)
         val spnLandType = dialogView.findViewById<Spinner>(R.id.spnLandType)
@@ -836,6 +1170,7 @@ class MapFragment : Fragment() {
                 .show()
         }
     }
+
     private suspend fun getAddressFromLatLng(lat: Double, lng: Double): String? {
         val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lng"
         val client = okhttp3.OkHttpClient()
@@ -852,6 +1187,7 @@ class MapFragment : Fragment() {
         }
     }
 }
+
 suspend fun getDistrictFromLatLngNominatim(lat: Double, lng: Double): String? {
     val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lng"
     val client = okhttp3.OkHttpClient()
@@ -864,12 +1200,21 @@ suspend fun getDistrictFromLatLngNominatim(lat: Double, lng: Double): String? {
             val body = response.body?.string() ?: return@withContext null
             val json = org.json.JSONObject(body)
             val address = json.optJSONObject("address")
-            val fields = listOf("county", "district", "suburb", "city_district", "state_district", "region", "quarter")
+            val fields = listOf(
+                "county",
+                "district",
+                "suburb",
+                "city_district",
+                "state_district",
+                "region",
+                "quarter"
+            )
             fields.mapNotNull { address?.optString(it) }
                 .firstOrNull { it.isNotBlank() }
         }
     }
 }
+
 @Composable
 fun LoginButton(
     isLoggedIn: Boolean,
