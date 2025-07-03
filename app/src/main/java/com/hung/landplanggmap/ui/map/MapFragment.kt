@@ -23,6 +23,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.mapbox.geojson.Point
+import com.mapbox.geojson.Polygon
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
@@ -33,6 +34,7 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.style
 import com.mapbox.maps.plugin.annotation.AnnotationPlugin
 import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolygonAnnotationManager
@@ -220,34 +222,56 @@ class MapFragment : Fragment() {
             mMapView?.getMapboxMap()?.loadStyleUri(Style.MAPBOX_STREETS)
             mAnnotationApi = mMapView?.annotations
             mPolygonAnnotationManager = mAnnotationApi?.createPolygonAnnotationManager()
-            //binding.fabHelp = binding.root.findViewById(R.id.fab_help)
-            //binding.fabToggleLands = binding.root.findViewById(R.id.fab_toggle_lands) // Thêm dòng này
+
         } catch (e: Exception) {
             Log.e(TAG, "Error in prepareViews: ${e.message}")
             e.printStackTrace()
         }
     }
 
+    //nút bật tắt tất cả mảnh đất đã vẽ
     private fun initListeners() {
         binding.fabLocation.setOnClickListener {
-            getUserLocation() // Hiển thị vị trí hiện tại của người dùng
+            getUserLocation()
             lifecycleScope.launch {
                 val userId = firebaseAuth.currentUser?.uid
                 if (userId != null) {
                     val userLands = landViewModel.lands.value.filter { it.createdBy == userId }
                     if (userLands.isNotEmpty()) {
-                        mPolygonAnnotationManager?.deleteAll()
-                        userLands.forEach { land ->
-                            val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                            if (points.size > 2) {
-                                val colorHex = getLandColorHex(land.landType)
-                                val polygonAnnotationOptions = PolygonAnnotationOptions()
-                                    .withPoints(listOf(points))
-                                    .withFillColor(colorHex)
-                                    .withFillOpacity(0.4)
-                                mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+                        // Chỉ xóa mảnh đất đã lưu, không ảnh hưởng mảnh đất tạm
+                        if (!isLandsVisible) {
+                            val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                            if (existingAnnotations != null) {
+                                val savedAnnotations = existingAnnotations.filter { annotation ->
+                                    userLands.any { land ->
+                                        val landPoints = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                                        val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.get(0)?.map {
+                                            Point.fromLngLat(it.longitude(), it.latitude())
+                                        } ?: emptyList()
+                                        landPoints.size == annotationPoints.size && landPoints.containsAll(annotationPoints)
+                                    }
+                                }
+                                if (savedAnnotations.isNotEmpty()) {
+                                    mPolygonAnnotationManager?.delete(savedAnnotations)
+                                }
                             }
                         }
+                        if (isLandsVisible) {
+                            mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
+                            userLands.forEach { land ->
+                                val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                                if (points.size > 2) {
+                                    val colorHex = getLandColorHex(land.landType)
+                                    val polygonAnnotationOptions = PolygonAnnotationOptions()
+                                        .withPoints(listOf(points))
+                                        .withFillColor(colorHex)
+                                        .withFillOpacity(0.4)
+                                    mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+                                }
+                            }
+                        }
+                        // Luôn vẽ lại mảnh đất tạm, không bị xóa
+                        drawCurrentPolygon()
                         Toast.makeText(requireContext(), "Hiển thị mảnh đất của bạn", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(requireContext(), "Bạn chưa có mảnh đất nào", Toast.LENGTH_SHORT).show()
@@ -305,6 +329,7 @@ class MapFragment : Fragment() {
             binding.layoutAddPolygonNavigator.visibility = View.VISIBLE
             binding.imgCursor.visibility = View.VISIBLE
             binding.layoutMainNavigator.visibility = View.GONE
+            drawCurrentPolygon() // Đảm bảo mảnh đất tạm được vẽ lại
         }
 
         binding.btnCloseDrawing.setOnClickListener {
@@ -312,7 +337,11 @@ class MapFragment : Fragment() {
             binding.imgCursor.visibility = View.GONE
             binding.lblArea.visibility = View.GONE
             binding.layoutMainNavigator.visibility = View.VISIBLE
-            clearMapView()
+            mPointsList.clear()
+            if (isLandsVisible) {
+                drawAllLands(landViewModel.lands.value)
+            }
+            drawCurrentPolygon() // Giữ mảnh đất tạm nếu có
         }
 
         binding.fabHelp.setOnClickListener {
@@ -330,14 +359,48 @@ class MapFragment : Fragment() {
             isLandsVisible = !isLandsVisible
             if (isLandsVisible) {
                 val lands = landViewModel.lands.value
-                drawAllLands(lands)
+                mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
+                val userId = firebaseAuth.currentUser?.uid
+                if (userId != null) {
+                    val userLands = lands.filter { it.createdBy == userId }
+                    userLands.forEach { land ->
+                        val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                        if (points.size > 2) {
+                            val colorHex = getLandColorHex(land.landType)
+                            val polygonAnnotationOptions = PolygonAnnotationOptions()
+                                .withPoints(listOf(points))
+                                .withFillColor(colorHex)
+                                .withFillOpacity(0.4)
+                            mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+                        }
+                    }
+                }
                 binding.fabToggleLands.setImageResource(R.drawable.ic_toggle_on)
-                Toast.makeText(requireContext(), "Hiển thị tất cả mảnh đất", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Hiển thị mảnh đất của bạn", Toast.LENGTH_SHORT).show()
             } else {
-                mPolygonAnnotationManager?.deleteAll()
+                val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                if (existingAnnotations != null) {
+                    val userId = firebaseAuth.currentUser?.uid
+                    if (userId != null) {
+                        val userLands = landViewModel.lands.value.filter { it.createdBy == userId }
+                        val savedAnnotations = existingAnnotations.filter { annotation ->
+                            userLands.any { land ->
+                                val landPoints = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                                val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.get(0)?.map {
+                                    Point.fromLngLat(it.longitude(), it.latitude())
+                                } ?: emptyList()
+                                landPoints.size == annotationPoints.size && landPoints.containsAll(annotationPoints)
+                            }
+                        }
+                        if (savedAnnotations.isNotEmpty()) {
+                            mPolygonAnnotationManager?.delete(savedAnnotations)
+                        }
+                    }
+                }
                 binding.fabToggleLands.setImageResource(R.drawable.ic_toggle_off)
-                Toast.makeText(requireContext(), "Ẩn tất cả mảnh đất", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Ẩn mảnh đất của bạn", Toast.LENGTH_SHORT).show()
             }
+            drawCurrentPolygon() // Luôn giữ mảnh đất tạm
         }
     }
 
@@ -437,18 +500,28 @@ class MapFragment : Fragment() {
             }
         }
     }
-
+    //ve tam thoi manh dat them moi
     private fun drawCurrentPolygon() {
         try {
-            mPolygonAnnotationManager?.deleteAll()
+            // Chỉ xóa mảnh đất tạm cũ, không ảnh hưởng mảnh đất đã lưu
+            val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+            if (existingAnnotations != null) {
+                val annotationsToDelete = existingAnnotations.filter { annotation ->
+                    val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.firstOrNull() ?: emptyList()
+                    annotationPoints.size == mPointsList.size && annotationPoints.containsAll(mPointsList)
+                }
+                if (annotationsToDelete.isNotEmpty()) {
+                    mPolygonAnnotationManager?.delete(annotationsToDelete)
+                }
+            }
+
             if (mPointsList.size > 2) {
                 val polygonAnnotationOptions = PolygonAnnotationOptions()
                     .withPoints(listOf(mPointsList))
-                    .withFillColor("#ee4e8b")
+                    .withFillColor("#00CED1") // Màu xanh nước biển mặc định
                     .withFillOpacity(0.4)
                 mPolygonAnnotationManager?.create(polygonAnnotationOptions)
 
-                // Chuyển mPointsList thành List<LatLng>
                 val latLngList = mPointsList.toLatLngList()
                 drawPolygonCenterMarker(latLngList.centerOfLatLngPolygon().toPoint())
 
@@ -459,28 +532,46 @@ class MapFragment : Fragment() {
             Log.e(TAG, "Lỗi khi vẽ đa giác: ${e.message}")
         }
     }
+
+
     private fun LatLng.toPoint(): Point {
         return Point.fromLngLat(this.lng, this.lat)
     }
 
     private fun drawAllLands(lands: List<LandParcel>) {
         try {
-            mPolygonAnnotationManager?.deleteAll()
-            lands.forEach { land ->
-                val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                if (points.size > 2) {
-                    val colorHex = getLandColorHex(land.landType) // Luôn sử dụng màu mặc định
-                    val polygonAnnotationOptions = PolygonAnnotationOptions()
-                        .withPoints(listOf(points))
-                        .withFillColor(colorHex)
-                        .withFillOpacity(0.4)
-                    mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+            if (isLandsVisible) {
+                val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                if (existingAnnotations != null) {
+                    val savedAnnotations = existingAnnotations.filter { annotation ->
+                        val annotationPoints = (annotation.geometry as? Polygon)?.coordinates()?.firstOrNull() ?: emptyList()
+                        lands.any { land ->
+                            val landPoints = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                            annotationPoints.size == landPoints.size && annotationPoints.containsAll(landPoints)
+                        }
+                    }
+                    if (savedAnnotations.isNotEmpty()) {
+                        mPolygonAnnotationManager?.delete(savedAnnotations)
+                    }
+                }
+
+                lands.forEach { land ->
+                    val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                    if (points.size > 2) {
+                        val colorHex = getLandColorHex(land.landType)
+                        val polygonAnnotationOptions = PolygonAnnotationOptions()
+                            .withPoints(listOf(points))
+                            .withFillColor(colorHex)
+                            .withFillOpacity(0.4)
+                        mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+                    }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error drawing all lands: ${e.message}")
         }
     }
+
 
     private fun drawPolygonCenterMarker(point: Point) {
         mMapView?.getMapboxMap()?.loadStyle(
@@ -535,7 +626,9 @@ class MapFragment : Fragment() {
     private fun clearMapView() {
         mMapView?.getMapboxMap()?.getStyle()?.removeStyleLayer("flag_layer_id")
         mMapView?.getMapboxMap()?.getStyle()?.removeStyleLayer("position_layer_id")
-        mPolygonAnnotationManager?.deleteAll()
+        if (!isLandsVisible) {
+            mPolygonAnnotationManager?.deleteAll()
+        }
         mPointsList.clear()
     }
 

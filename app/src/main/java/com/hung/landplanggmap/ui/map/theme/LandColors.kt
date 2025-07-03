@@ -13,5 +13,5 @@ fun getLandColorHex(landType: Int): String = when (landType) {
     1 -> "#FF3333" // Đỏ
     2 -> "#00FF00" // Xanh lá
     3 -> "#FFFF00" // Vàng
-    else -> "#888888" // Xám mặc định
+    else -> "#0000FF" // Xám mặc định
 }
