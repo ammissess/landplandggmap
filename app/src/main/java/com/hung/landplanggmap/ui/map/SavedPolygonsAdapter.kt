@@ -8,6 +8,7 @@ import com.hung.landplanggmap.databinding.ItemSavedPolygonsBinding
 import com.hung.landplanggmap.utils.areaFormat
 import com.hung.landplanggmap.ui.map.theme.getLandColorHex
 
+
 class SavedPolygonsAdapter(
     private var items: ArrayList<LandParcel>,
     private val listener: LandItemClickListener
@@ -32,12 +33,12 @@ class SavedPolygonsAdapter(
 
         holder.binding.btnDelete.setOnClickListener { listener.deleteLand(land) }
         holder.binding.btnCopy.setOnClickListener { listener.copyLand(land) }
-        holder.binding.btnDisplay.setOnClickListener { listener.displayOnMap(land) }
+        holder.binding.btnDisplay.setOnClickListener { listener.onDisplayPolygon(land) } // Hiển thị polygon
 
-        // Làm cho toàn bộ item clickable (tùy chọn)
-        holder.itemView.setOnClickListener {
-            listener.displayOnMap(land) // Gọi popup khi click vào item
-        }
+        // Gắn sự kiện displayOnMap cho itemView, lblTitle, và lblArea để hiển thị popup
+        holder.itemView.setOnClickListener { listener.displayOnMap(land) }
+        holder.binding.lblTitle.setOnClickListener { listener.displayOnMap(land) }
+        holder.binding.lblArea.setOnClickListener { listener.displayOnMap(land) }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MainHolder {

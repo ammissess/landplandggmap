@@ -376,7 +376,7 @@ class MapFragment : Fragment() {
                     }
                 }
                 binding.fabToggleLands.setImageResource(R.drawable.ic_toggle_on)
-                Toast.makeText(requireContext(), "Hiển thị mảnh đất của bạn", Toast.LENGTH_SHORT).show()
+                //Toast.makeText(requireContext(), "Hiển thị mảnh đất của bạn", Toast.LENGTH_SHORT).show()
             } else {
                 val existingAnnotations = mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
                 if (existingAnnotations != null) {
@@ -398,7 +398,7 @@ class MapFragment : Fragment() {
                     }
                 }
                 binding.fabToggleLands.setImageResource(R.drawable.ic_toggle_off)
-                Toast.makeText(requireContext(), "Ẩn mảnh đất của bạn", Toast.LENGTH_SHORT).show()
+                //Toast.makeText(requireContext(), "Ẩn mảnh đất của bạn", Toast.LENGTH_SHORT).show()
             }
             drawCurrentPolygon() // Luôn giữ mảnh đất tạm
         }
@@ -410,13 +410,16 @@ class MapFragment : Fragment() {
             mSavedPolygonsBottomSheetDialog?.setContentView(R.layout.dialog_saved_polygons_list)
             val rcvSavedPolygons = mSavedPolygonsBottomSheetDialog?.findViewById<RecyclerView>(R.id.rcvSavedPolygons)
             mSavedPolygonsAdapter = SavedPolygonsAdapter(ArrayList(), object : LandItemClickListener {
+
+
                 override fun deleteLand(land: LandParcel) {
                     lifecycleScope.launch {
                         val db = FirebaseFirestore.getInstance()
                         val query = db.collection("lands")
                             .whereEqualTo("createdBy", land.createdBy)
                             .whereEqualTo("registerDate", land.registerDate)
-                            .get().await()
+                            .get()
+                            .await()
                         for (doc in query.documents) {
                             doc.reference.delete()
                         }
@@ -433,8 +436,45 @@ class MapFragment : Fragment() {
                 }
 
                 override fun displayOnMap(land: LandParcel) {
-                    showLandDetailDialog(land) // Hiển thị popup khi nhấn vào item
+                    showLandDetailDialog(land)
                 }
+
+                override fun onDisplayPolygon(land: LandParcel) {
+                    lifecycleScope.launch {
+                        // Ẩn BottomSheetDialog
+                        mSavedPolygonsBottomSheetDialog?.dismiss()
+
+                        mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
+                        val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+                        if (points.size > 2) {
+                            val colorHex = getLandColorHex(land.landType)
+                            val polygonAnnotationOptions = PolygonAnnotationOptions()
+                                .withPoints(listOf(points))
+                                .withFillColor(colorHex)
+                                .withFillOpacity(0.4)
+                            mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+
+                            // Lấy trung tâm của polygon
+                            val center = land.coordinates.centerOfLatLngPolygon().toPoint()
+
+                            // Lấy mức zoom hiện tại và di chuyển camera mà không thay đổi zoom
+                            val currentCameraState = mMapView?.getMapboxMap()?.cameraState
+                            if (currentCameraState != null) {
+                                val cameraOptions = CameraOptions.Builder()
+                                    .center(center)
+                                    .zoom(currentCameraState.zoom) // Giữ nguyên mức zoom hiện tại
+                                    .build()
+                                mMapView?.getMapboxMap()?.setCamera(cameraOptions)
+                            }
+
+                            Toast.makeText(requireContext(), "Hiển thị mảnh đất của ${land.ownerName}", Toast.LENGTH_SHORT).show()
+                        }
+                        // Vẽ lại mảnh đất tạm nếu có
+                        drawCurrentPolygon()
+                    }
+                }
+
+
             })
             rcvSavedPolygons?.adapter = mSavedPolygonsAdapter
         }

@@ -6,4 +6,5 @@ interface LandItemClickListener {
     fun deleteLand(land: LandParcel)
     fun copyLand(land: LandParcel)
     fun displayOnMap(land: LandParcel)
+    fun onDisplayPolygon(land: LandParcel)
 }
