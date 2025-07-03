@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/bg_rounded_dialog">
+
+    <com.google.android.material.textview.MaterialTextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TÌM KIẾM ĐẤT"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_gravity="center"
+        android:layout_marginBottom="16dp"/>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Nhập tên chủ sở hữu hoặc diện tích đất">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/edtSearch"
+            android:inputType="text"/>
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="16dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnCancelDialog"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Cancel"
+            android:layout_weight="1"
+            android:layout_marginEnd="16dp"
+            android:backgroundTint="#00FFCC"
+            android:textColor="@color/black"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSearchDialog"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Search"
+            android:layout_weight="1"
+            android:layout_marginStart="16dp"
+            android:backgroundTint="#00FFCC"
+            android:textColor="@color/black"/>
+
+    </LinearLayout>
+
+</LinearLayout>

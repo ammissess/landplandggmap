@@ -63,6 +63,7 @@ import com.hung.landplanggmap.utils.centerOfLatLngPolygon
 import com.hung.landplanggmap.utils.isPolygonIntersect
 import com.hung.landplanggmap.ui.map.theme.getLandColorHex
 import android.content.Context
+import androidx.core.content.ContextCompat
 import com.hung.landplanggmap.R
 import com.hung.landplanggmap.databinding.FragmentMapBinding
 
@@ -344,6 +345,32 @@ class MapFragment : Fragment() {
             drawCurrentPolygon() // Giữ mảnh đất tạm nếu có
         }
 
+
+        //nut tim kiem
+        binding.btnSearchh.setOnClickListener {
+            val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search, null)
+            val searchEditText = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edtSearch)
+            val searchButton = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnSearchDialog)
+            val cancelButton = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCancelDialog)
+
+            val dialog = BottomSheetDialog(requireContext(), R.style.CustomBottomSheetDialog)
+            dialog.setContentView(dialogView)
+            val bottomSheet = dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
+            bottomSheet?.background = ContextCompat.getDrawable(requireContext(), R.drawable.bg_rounded_dialog)
+
+            searchButton.setOnClickListener {
+                val searchText = searchEditText.text.toString()
+                Toast.makeText(requireContext(), "Searching for: $searchText", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+
+            cancelButton.setOnClickListener {
+                dialog.dismiss()
+            }
+
+            dialog.show()
+        }
+
         binding.fabHelp.setOnClickListener {
             lifecycleScope.launch {
                 allowedDistrict?.let { district ->
@@ -488,9 +515,9 @@ class MapFragment : Fragment() {
             allowedProvince = document.getString("province")
             allowedCountry = document.getString("country")
             allowedDistrict?.let {
-                Toast.makeText(requireContext(),
-                    "Bạn chỉ có quyền vẽ đường quy hoạch tại địa điểm Quận/Huyện: $it ",
-                    Toast.LENGTH_LONG).show()
+                //Toast.makeText(requireContext(),
+                   // "Bạn chỉ có quyền vẽ đường quy hoạch tại địa điểm Quận/Huyện: $it ",
+                    //Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch user permissions", e)
