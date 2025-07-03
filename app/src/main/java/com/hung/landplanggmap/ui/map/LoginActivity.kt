@@ -6,7 +6,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -30,6 +29,8 @@ import com.hung.landplanggmap.MainActivity
 import com.hung.landplanggmap.ui.map.theme.MapPolygonPointsDrawTheme
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.material3.*
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 //import com.arashjahani.mappolygonpointsdraw.R
 import com.google.firebase.firestore.FirebaseFirestore
 import com.hung.landplanggmap.R
@@ -40,8 +41,19 @@ class LoginActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         auth = FirebaseAuth.getInstance()
 
+        // Nếu người dùng đã đăng nhập, chuyển thẳng đến MainActivity
+        val currentUser = auth.currentUser
+        if (currentUser != null) {
+            val intent = Intent(this, MainActivity::class.java)
+            startActivity(intent)
+            finish()
+            return // Không chạy tiếp setContent nữa
+        }
+
+        // Nếu chưa đăng nhập thì hiển thị màn hình đăng nhập
         setContent {
             MapPolygonPointsDrawTheme {
                 var isLoading by remember { mutableStateOf(false) }
@@ -56,7 +68,7 @@ class LoginActivity : ComponentActivity() {
                         loginUser(email, password,
                             onSuccess = {
                                 isLoading = false
-                                Toast.makeText(this, "Login successful", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, "Đăng nhập thành công!", Toast.LENGTH_SHORT).show()
                                 startActivity(Intent(this, MainActivity::class.java))
                                 finish()
                             },
@@ -70,6 +82,7 @@ class LoginActivity : ComponentActivity() {
             }
         }
     }
+
 
     private fun loginUser(
         email: String,
@@ -101,7 +114,11 @@ class LoginActivity : ComponentActivity() {
                         finish()
                     }
                 } else {
-                    Toast.makeText(this, "Login failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this,
+                        "Đăng nhập thất bại: ${task.exception?.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
     }
@@ -119,17 +136,14 @@ fun LoginScreen(
 
     // Gradient background
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF512DA8), // Deep purple
-                        Color(0xFF1976D2)  // Blue
-                    )
-                )
-            )
+        modifier = Modifier.fillMaxSize()
     ) {
+        Image(
+            painter = painterResource(id = R.drawable.nen_login),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -139,7 +153,7 @@ fun LoginScreen(
         ) {
             // Logo
             Image(
-                painter = painterResource(id = R.drawable.ic_map), // Đặt icon map của bạn vào drawable/ic_map.xml hoặc png
+                painter = painterResource(id = R.drawable.lanndpp), // Đặt icon map của bạn vào drawable/ic_map.xml hoặc png
                 contentDescription = "App Logo",
                 modifier = Modifier
                     .size(80.dp)
@@ -147,7 +161,9 @@ fun LoginScreen(
             )
 
             Text(
-                text = "MapPolygonPointsDraw",
+                text = "Quy Hoạch Đất",
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White,
                 modifier = Modifier.padding(bottom = 24.dp)
@@ -181,9 +197,13 @@ fun LoginScreen(
                 label = { Text("Password") },
                 leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
                 trailingIcon = {
-                    val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                    val image =
+                        if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(image, contentDescription = if (passwordVisible) "Hide password" else "Show password")
+                        Icon(
+                            image,
+                            contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                        )
                     }
                 },
                 singleLine = true,
@@ -219,7 +239,10 @@ fun LoginScreen(
                     .fillMaxWidth()
                     .height(50.dp),
                 enabled = !isLoading,
-                shape = MaterialTheme.shapes.medium
+                shape = MaterialTheme.shapes.medium,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF3366FF)
+                )
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
@@ -228,7 +251,7 @@ fun LoginScreen(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text("Login", fontSize = 18.sp)
+                    Text("Đăng nhập", fontSize = 18.sp)
                 }
             }
         }

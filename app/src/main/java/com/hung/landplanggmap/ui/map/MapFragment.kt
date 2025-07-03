@@ -66,6 +66,7 @@ import com.hung.landplanggmap.ui.map.theme.getLandColorHex
 import android.content.Context
 import android.graphics.Color
 import android.view.Gravity
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.hung.landplanggmap.R
 import com.hung.landplanggmap.databinding.FragmentMapBinding
@@ -172,8 +173,9 @@ class MapFragment : Fragment() {
                         },
                         onLogoutClick = {
                             FirebaseAuth.getInstance().signOut()
-                            Toast.makeText(requireContext(), "Logged out", Toast.LENGTH_SHORT)
-                                .show()
+                            Toast.makeText(requireContext(), "Đăng xuất tài khoản thành công", Toast.LENGTH_SHORT).show()
+                            startActivity(Intent(requireActivity(), LoginActivity::class.java)) // Chuyển về LoginActivity
+                            requireActivity().finish() // Đóng Fragment và Activity hiện tại
                         }
                     )
                 }
@@ -1346,17 +1348,24 @@ fun LoginButton(
     onLoginClick: () -> Unit,
     onLogoutClick: () -> Unit
 ) {
+    val context = LocalContext.current
+
     var expanded by remember { mutableStateOf(false) }
 
     Box {
-        IconButton(onClick = {
-            if (isLoggedIn) expanded = true else onLoginClick()
-        }) {
+        IconButton(
+            onClick = {
+                if (isLoggedIn) expanded = true else onLoginClick()
+            },
+            modifier = Modifier.size(48.dp)
+        ) {
             Icon(
                 imageVector = Icons.Default.AccountCircle,
-                contentDescription = "Account"
+                contentDescription = "Account",
+                modifier = Modifier.size(24.dp)
             )
         }
+
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
@@ -1364,13 +1373,14 @@ fun LoginButton(
             if (isLoggedIn) {
                 DropdownMenuItem(
                     text = { Text(userEmail ?: "Account") },
-                    onClick = { /* Không làm gì */ },
+                    onClick = {},
                     enabled = false
                 )
                 DropdownMenuItem(
                     text = { Text("Logout") },
                     onClick = {
                         expanded = false
+                        Toast.makeText(context, "Đã đăng xuất", Toast.LENGTH_SHORT).show()
                         onLogoutClick()
                     }
                 )
@@ -1378,3 +1388,4 @@ fun LoginButton(
         }
     }
 }
+
