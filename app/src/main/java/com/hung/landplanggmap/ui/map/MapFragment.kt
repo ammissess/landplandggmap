@@ -271,7 +271,11 @@ class MapFragment : Fragment() {
     }
 
     // Cập nhật phương thức moveToPosition, zoom màn hình bản đồ
-    private fun moveToPosition(location: Point, showPositionMarker: Boolean = false, zoomLevel: Double = 17.0) {
+    private fun moveToPosition(
+        location: Point,
+        showPositionMarker: Boolean = false,
+        zoomLevel: Double = 17.0
+    ) {
         val cameraPosition = CameraOptions.Builder()
             .zoom(zoomLevel) // Đặt zoom level khoảng 17.0 cho khoảng 100 feet
             .center(location)
@@ -508,12 +512,14 @@ class MapFragment : Fragment() {
         }
 
 
-
 // Sự kiện nhấn vào biểu tượng tìm kiếm (chỉ tìm kiếm địa điểm trong allowedDistrict)
         binding.ivSearchIcon.setOnClickListener {
-            val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search_new, null)
-            val searchEditText = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edtSearchNew)
-            val textInputLayout = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.textInputLayout)
+            val dialogView =
+                LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search_new, null)
+            val searchEditText =
+                dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edtSearchNew)
+            val textInputLayout =
+                dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.textInputLayout)
 
             val dialog = Dialog(requireContext(), R.style.CustomDialogAnimation)
             dialog.setContentView(dialogView)
@@ -533,17 +539,30 @@ class MapFragment : Fragment() {
                             val point = Point.fromLngLat(location.longitude(), location.latitude())
                             if (isPointInAllowedDistrict(point)) {
                                 moveToPosition(point, true, 17.0)
-                                Toast.makeText(requireContext(), "Đã tìm thấy: $searchText", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Đã tìm thấy: $searchText",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             } else {
-                                Toast.makeText(requireContext(), "Ngoài phạm vi tìm kiếm, không được phép!", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Ngoài phạm vi tìm kiếm, không được phép!",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         } else {
-                            Toast.makeText(requireContext(), "Không tìm thấy địa điểm: $searchText", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                requireContext(),
+                                "Không tìm thấy địa điểm: $searchText",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                         dialog.dismiss()
                     }
                 } else {
-                    Toast.makeText(requireContext(), "Vui lòng nhập địa điểm!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Vui lòng nhập địa điểm!", Toast.LENGTH_SHORT)
+                        .show()
                 }
             }
 
@@ -551,7 +570,7 @@ class MapFragment : Fragment() {
         }
 
 
-        //nut Loc ket qua quyhoach dat
+// nut Loc ket qua quyhoach dat
         binding.btnSearchh.setOnClickListener {
             val dialogView =
                 LayoutInflater.from(requireContext()).inflate(R.layout.dialog_search, null)
@@ -570,10 +589,35 @@ class MapFragment : Fragment() {
                 ContextCompat.getDrawable(requireContext(), R.drawable.bg_rounded_dialog)
 
             searchButton.setOnClickListener {
-                val searchText = searchEditText.text.toString()
-                Toast.makeText(requireContext(), "Searching for: $searchText", Toast.LENGTH_SHORT)
-                    .show()
-                dialog.dismiss()
+                val searchText = searchEditText.text.toString().trim()
+                if (searchText.isNotEmpty()) {
+                    lifecycleScope.launch {
+                        val filteredLands = filterLands(searchText)
+                        if (filteredLands.isNotEmpty()) {
+                            updateMapWithFilteredLands(filteredLands)
+                            mSavedPolygonsAdapter?.renewItems(filteredLands)
+                            mSavedPolygonsBottomSheetDialog?.show()
+                            Toast.makeText(
+                                requireContext(),
+                                "Đã lọc ${filteredLands.size} mảnh đất",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                requireContext(),
+                                "Không tìm thấy mảnh đất phù hợp!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        dialog.dismiss()
+                    }
+                } else {
+                    Toast.makeText(
+                        requireContext(),
+                        "Vui lòng nhập giá trị lọc!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
 
             cancelButton.setOnClickListener {
@@ -582,6 +626,9 @@ class MapFragment : Fragment() {
 
             dialog.show()
         }
+
+
+
 
         binding.fabHelp.setOnClickListener {
             lifecycleScope.launch {
@@ -743,6 +790,83 @@ class MapFragment : Fragment() {
             rcvSavedPolygons?.adapter = mSavedPolygonsAdapter
         }
     }
+
+    //ham Loc dat
+    // Hàm lọc danh sách mảnh đất dựa trên giá trị nhập
+    private suspend fun filterLands(searchText: String): List<LandParcel> {
+        val allLands = landViewModel.lands.value
+        return when {
+            searchText.matches(Regex("^\\d+$")) -> { // Chỉ số (ví dụ: 500)
+                val targetArea = searchText.toLong()
+                val minArea = (targetArea * 0.5).toLong() // 50% dưới
+                val maxArea = (targetArea * 1.5).toLong() // 50% trên
+                allLands.filter { it.area in minArea..maxArea }
+            }
+
+            searchText.matches(Regex("^>[\\d]+$")) -> { // >500
+                val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
+                allLands.filter { it.area > targetArea }
+            }
+
+            searchText.matches(Regex("^<[\\d]+$")) -> { // <500
+                val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
+                allLands.filter { it.area < targetArea }
+            }
+
+            searchText.matches(Regex("^[a-zA-Z]+$")) -> { // Chuỗi chữ cái (ví dụ: daicaxahoiden)
+                val prefixes = generateSequence(searchText.first().toString()) { prefix ->
+                    if (prefix.length < searchText.length) prefix + searchText[prefix.length] else null
+                }.toList()
+                allLands.filter { land ->
+                    land.ownerName?.let { ownerName ->
+                        prefixes.any { prefix ->
+                            ownerName.startsWith(prefix, ignoreCase = true)
+                        }
+                    } ?: false
+                }
+            }
+
+            else -> { // Định dạng không hợp lệ
+                Toast.makeText(requireContext(), "Giá trị lọc không hợp lệ!", Toast.LENGTH_SHORT)
+                    .show()
+                emptyList()
+            }
+        }
+    }
+
+    // Hàm cập nhật bản đồ với danh sách mảnh đất đã lọc
+    private fun updateMapWithFilteredLands(filteredLands: List<LandParcel>) {
+        mPolygonAnnotationManager?.deleteAll() // Xóa tất cả polygon hiện tại
+        val allLands = landViewModel.lands.value
+        allLands.forEach { land ->
+            val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+            if (points.size > 2 && !filteredLands.contains(land)) {
+                // Ẩn các mảnh không thuộc danh sách lọc
+                val existingAnnotations =
+                    mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                existingAnnotations?.find { annotation ->
+                    val annotationPoints =
+                        (annotation.geometry as? Polygon)?.coordinates()?.get(0)?.map {
+                            Point.fromLngLat(it.longitude(), it.latitude())
+                        } ?: emptyList()
+                    points.size == annotationPoints.size && points.containsAll(annotationPoints)
+                }?.let { mPolygonAnnotationManager?.delete(it) }
+            }
+        }
+        filteredLands.forEach { land ->
+            val points = land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
+            if (points.size > 2) {
+                val colorHex = getLandColorHex(land.landType)
+                val polygonAnnotationOptions = PolygonAnnotationOptions()
+                    .withPoints(listOf(points))
+                    .withFillColor(colorHex)
+                    .withFillOpacity(0.4)
+                mPolygonAnnotationManager?.create(polygonAnnotationOptions)
+            }
+        }
+        drawCurrentPolygon() // Giữ mảnh đất tạm nếu có
+    }
+
 
     private suspend fun fetchUserPermissions() {
         val user = firebaseAuth.currentUser ?: return
