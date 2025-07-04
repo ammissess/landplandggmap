@@ -68,12 +68,12 @@ import android.graphics.Color
 import android.view.Gravity
 import androidx.compose.foundation.clickable
 import java.text.Normalizer
-import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.hung.landplanggmap.R
 import com.hung.landplanggmap.databinding.FragmentMapBinding
+import org.locationtech.jts.algorithm.ConvexHull
 import com.mapbox.geojson.LineString
 import com.mapbox.maps.extension.style.layers.addLayer
 import com.mapbox.maps.extension.style.layers.generated.lineLayer
@@ -82,7 +82,10 @@ import com.mapbox.maps.plugin.gestures.addOnMapClickListener
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.GeometryFactory
 
 @AndroidEntryPoint
 class MapFragment : Fragment() {
@@ -92,8 +95,12 @@ class MapFragment : Fragment() {
         fun newInstance() = MapFragment()
     }
 
+    //bien giới hạn biên
+    private var allowedDistrictPolygon: Polygon? = null
+
     //bien kiem tra xac dinh vi tri
     private var isLocationDetermined = false
+
     //đếm lần click nút chỉ định
     private var clickCount = 0
 
@@ -177,7 +184,7 @@ class MapFragment : Fragment() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, top = 30.dp), // Căn trái và cạnh bên trên
-                        contentAlignment = Alignment.BottomStart
+                    contentAlignment = Alignment.BottomStart
                 ) {
                     LoginButton(
                         isLoggedIn = user != null,
@@ -223,7 +230,11 @@ class MapFragment : Fragment() {
                             )
                             landViewModel.addLand(land)
                             showAddLandDialog = false
-                            Toast.makeText(requireContext(), "Lưu mảnh đất thành công", Toast.LENGTH_SHORT)
+                            Toast.makeText(
+                                requireContext(),
+                                "Lưu mảnh đất thành công",
+                                Toast.LENGTH_SHORT
+                            )
                                 .show()
                             clearMapView()
                         }
@@ -295,6 +306,7 @@ class MapFragment : Fragment() {
             }
         }
     }
+
 
     // Cập nhật phương thức moveToPosition, zoom màn hình bản đồ
     private fun moveToPosition(
@@ -398,7 +410,8 @@ class MapFragment : Fragment() {
                     isLocationDetermined = true
                     lifecycleScope.launch {
                         //ten quận huyện hiện tại
-                        val currentDistrict = getDistrictFromLatLngNominatim(point.latitude(), point.longitude())
+                        val currentDistrict =
+                            getDistrictFromLatLngNominatim(point.latitude(), point.longitude())
                         // Kiểm tra vị trí trong allowedDistrict
                         if (isPointInAllowedDistrict(point)) {
                             Toast.makeText(
@@ -695,24 +708,52 @@ class MapFragment : Fragment() {
             dialog.show()
         }
 
-
-
-
+//fab_help
         binding.fabHelp.setOnClickListener {
             lifecycleScope.launch {
                 allowedDistrict?.let { district ->
-                    moveToDistrict(district)
-                    Toast.makeText(requireContext(), "Di chuyển đến $district", Toast.LENGTH_SHORT)
-                        .show()
+                    val polygon = getDistrictPolygonFromNominatim(district)
+                    if (polygon != null) {
+                        allowedDistrictPolygon = polygon // Để kiểm tra sau khi user vẽ
+
+                        mMapView?.getMapboxMap()?.getStyle { style ->
+                            if (style.styleLayerExists("outline-layer")) {
+                                style.removeStyleLayer("outline-layer")
+                            }
+                            if (style.styleSourceExists("outline-source")) {
+                                style.removeStyleSource("outline-source")
+                            }
+
+                            style.addSource(geoJsonSource("outline-source") {
+                                geometry(polygon)
+                            })
+                            style.addLayer(lineLayer("outline-layer", "outline-source") {
+                                lineColor("#0000FF")
+                                lineWidth(2.0)
+                                lineOpacity(1.0)
+                            })
+                        }
+
+                        moveToPosition(getPolygonCenter(polygon), false)
+                        // Di chuyển đến giữa polygon
+                    } else {
+                        Toast.makeText(
+                            requireContext(),
+                            "Không lấy được dữ liệu ranh giới $district",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 } ?: run {
                     Toast.makeText(
                         requireContext(),
-                        "Không tìm thấy khu vực quy hoạch",
+                        "Không có quận huyện được chọn",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
             }
         }
+
+
 
         binding.fabToggleLands.setOnClickListener {
             isLandsVisible = !isLandsVisible
@@ -766,6 +807,13 @@ class MapFragment : Fragment() {
             }
             drawCurrentPolygon() // Luôn giữ mảnh đất tạm
         }
+    }
+
+    private fun getPolygonCenter(polygon: Polygon): Point {
+        val allPoints = polygon.coordinates()[0]
+        val avgLat = allPoints.map { it.latitude() }.average()
+        val avgLng = allPoints.map { it.longitude() }.average()
+        return Point.fromLngLat(avgLng, avgLat)
     }
 
     private fun loadSavedPolygonsList() {
@@ -859,12 +907,52 @@ class MapFragment : Fragment() {
         }
     }
 
+
+    //hàm lấy biên giới đất
+    suspend fun getDistrictPolygonFromNominatim(districtName: String): Polygon? {
+        val url =
+            "https://nominatim.openstreetmap.org/search.php?q=$districtName&polygon_geojson=1&format=jsonv2"
+
+        val client = OkHttpClient()
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "LandApp")
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = client.newCall(request).execute()
+                val body = response.body?.string()
+                val jsonArray = JSONArray(body)
+                if (jsonArray.length() > 0) {
+                    val geo = jsonArray.getJSONObject(0).getJSONObject("geojson")
+                    if (geo.getString("type") == "Polygon") {
+                        val coordinates = geo.getJSONArray("coordinates").getJSONArray(0)
+                        val points = mutableListOf<Point>()
+                        for (i in 0 until coordinates.length()) {
+                            val coord = coordinates.getJSONArray(i)
+                            val lng = coord.getDouble(0)
+                            val lat = coord.getDouble(1)
+                            points.add(Point.fromLngLat(lng, lat))
+                        }
+                        return@withContext Polygon.fromLngLats(listOf(points))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("DistrictPolygon", "Error: ${e.message}")
+            }
+            return@withContext null
+        }
+    }
+
+
     //ham Loc dat
     // Hàm lọc danh sách mảnh đất dựa trên giá trị nhập
     private suspend fun filterLands(searchText: String): List<LandParcel> {
         val allLands = landViewModel.lands.value
         val normalizedSearch = searchText.trim().lowercase()
-        val searchWithDiacritics = normalizeVietnameseDiacritics(normalizedSearch) // Chuẩn hóa có dấu
+        val searchWithDiacritics =
+            normalizeVietnameseDiacritics(normalizedSearch) // Chuẩn hóa có dấu
 
         return when {
             // Trường hợp nhập số (giữ nguyên logic cũ)
@@ -874,10 +962,12 @@ class MapFragment : Fragment() {
                 val maxArea = (targetArea * 1.5).toLong() // 50% trên
                 allLands.filter { it.area in minArea..maxArea }
             }
+
             searchText.matches(Regex("^>[\\d]+$")) -> { // >500
                 val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
                 allLands.filter { it.area > targetArea }
             }
+
             searchText.matches(Regex("^<[\\d]+$")) -> { // <500
                 val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
                 allLands.filter { it.area < targetArea }
@@ -885,7 +975,8 @@ class MapFragment : Fragment() {
             // Trường hợp nhập chuỗi (có dấu hoặc không dấu)
             else -> {
                 val results = mutableListOf<LandParcel>()
-                val searchWords = normalizedSearch.split(" ") // Tách thành các từ (ví dụ: "Hoàng Thị Yến" -> ["hoang", "thi", "yen"])
+                val searchWords =
+                    normalizedSearch.split(" ") // Tách thành các từ (ví dụ: "Hoàng Thị Yến" -> ["hoang", "thi", "yen"])
 
                 allLands.forEach { land ->
                     land.ownerName?.let { ownerName ->
@@ -913,7 +1004,8 @@ class MapFragment : Fragment() {
                 // Sắp xếp kết quả: Ưu tiên có dấu > không dấu > gần giống
                 results.sortWith(compareByDescending { land ->
                     val ownerName = land.ownerName?.lowercase() ?: ""
-                    val isDiacriticMatch = ownerName.contains(searchWithDiacritics, ignoreCase = true)
+                    val isDiacriticMatch =
+                        ownerName.contains(searchWithDiacritics, ignoreCase = true)
                     val isNoDiacriticMatch = ownerName.contains(normalizedSearch, ignoreCase = true)
                     when {
                         isDiacriticMatch -> 2 // Ưu tiên cao nhất
@@ -923,7 +1015,11 @@ class MapFragment : Fragment() {
                 })
 
                 if (results.isEmpty()) {
-                    Toast.makeText(requireContext(), "Không tìm thấy mảnh đất phù hợp!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        "Không tìm thấy mảnh đất phù hợp!",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
                 results
             }
@@ -1167,7 +1263,8 @@ class MapFragment : Fragment() {
     // Thêm hàm hiển thị popup
     private fun showLandDetailDialog(land: LandParcel) {
         selectedLand = land
-        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_land_detail, null)
+        val dialogView =
+            LayoutInflater.from(requireContext()).inflate(R.layout.dialog_land_detail, null)
         val dialog = BottomSheetDialog(requireContext())
         dialog.setContentView(dialogView)
 
@@ -1194,21 +1291,34 @@ class MapFragment : Fragment() {
         layoutParams.height = height
         dialogView.layoutParams = layoutParams
 
-        // Nút Chỉ đường
+
+// Nút Chỉ đường
         dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnNavigate)
             .setOnClickListener {
                 if (!isLocationDetermined) {
-                    Toast.makeText(requireContext(), "Cần xác định vị trí hiện tại", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        "Cần xác định vị trí hiện tại",
+                        Toast.LENGTH_SHORT
+                    ).show()
                     return@setOnClickListener
                 }
                 getUserLocation { currentLocation ->
                     if (currentLocation != null) {
-                        val startPoint = Point.fromLngLat(currentLocation.longitude, currentLocation.latitude)
+                        val startPoint =
+                            Point.fromLngLat(currentLocation.longitude, currentLocation.latitude)
                         val endPoint = land.coordinates.centerOfLatLngPolygon().toPoint()
-                        drawRoute(startPoint, endPoint)
-                        dialog.dismiss()
+                        drawRoute(startPoint, endPoint) { success ->
+                            if (success) {
+                                dialog.dismiss() // Ẩn dialog chỉ khi vẽ đường thành công
+                            }
+                        }
                     } else {
-                        Toast.makeText(requireContext(), "Không thể xác định vị trí hiện tại", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            requireContext(),
+                            "Không thể xác định vị trí hiện tại",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             }
@@ -1223,7 +1333,7 @@ class MapFragment : Fragment() {
     }
 
     //vẽ chỉ đường dựa vào api mapbox
-    private fun drawRoute(startPoint: Point, endPoint: Point) {
+    private fun drawRoute(startPoint: Point, endPoint: Point, onComplete: (Boolean) -> Unit) {
         mMapView?.getMapboxMap()?.getStyle { style ->
             // Xóa layer và source cũ nếu tồn tại
             if (style.styleLayerExists("route-layer")) {
@@ -1233,7 +1343,8 @@ class MapFragment : Fragment() {
                 style.removeStyleSource("route-source")
             }
 
-            val accessToken = "sk.eyJ1IjoiYW1taXNzZXNzIiwiYSI6ImNtY2MwZHFqNzAxcWgyanFzaHNrNXVhNzEifQ.joiQ_GqrlotS5FkxJAf_9w" // Thay bằng token thật
+            val accessToken =
+                "sk.eyJ1IjoiYW1taXNzZXNzIiwiYSI6ImNtY2MwZHFqNzAxcWgyanFzaHNrNXVhNzEifQ.joiQ_GqrlotS5FkxJAf_9w" // Thay bằng token thật
             val url = "https://api.mapbox.com/directions/v5/mapbox/driving/" +
                     "${startPoint.longitude()},${startPoint.latitude()};" +
                     "${endPoint.longitude()},${endPoint.latitude()}?access_token=$accessToken&geometries=geojson"
@@ -1262,13 +1373,27 @@ class MapFragment : Fragment() {
                                     lineWidth(4.0)
                                     lineOpacity(0.8)
                                 })
+                                onComplete(true) // Báo hiệu vẽ đường thành công
                             }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                onComplete(false) // Không có tuyến đường
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            onComplete(false) // Không có dữ liệu
                         }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error drawing route: ${e.message}")
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Không thể vẽ đường đi", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            requireContext(),
+                            "Không thể vẽ đường đi",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        onComplete(false) // Báo lỗi
                     }
                 }
             }
@@ -1545,6 +1670,8 @@ class MapFragment : Fragment() {
             }
         }
     }
+
+
 }
 
 suspend fun getDistrictFromLatLngNominatim(lat: Double, lng: Double): String? {
