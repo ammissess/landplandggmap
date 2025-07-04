@@ -15,6 +15,7 @@
         android:layout_marginTop="16dp"
         android:layout_marginBottom="16dp"
         android:text="Tìm kiếm địa điểm"
+        android:textColor="@color/black"
         android:textSize="18sp"
         android:textStyle="bold" />
 
