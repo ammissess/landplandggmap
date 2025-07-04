@@ -93,10 +93,10 @@
         android:textColor="@color/white"
         app:backgroundTint="@color/black"
         app:layout_constraintTop_toBottomOf="@+id/tvRegisterDate"
-        app:layout_constraintEnd_toStartOf="@+id/btnClosee"
-        app:layout_constraintBottom_toBottomOf="@+id/btnClosee"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
         android:layout_marginTop="16dp"
-        android:layout_marginEnd="8dp" />
+        android:layout_marginEnd="0dp" />
 
     <!-- Nút đóng -->
     <com.google.android.material.button.MaterialButton
@@ -106,8 +106,10 @@
         android:text="Đóng"
         android:textColor="@color/white"
         app:backgroundTint="@color/black"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/tvRegisterDate"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="16dp" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        android:layout_marginTop="16dp"
+        android:layout_marginStart="0dp" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

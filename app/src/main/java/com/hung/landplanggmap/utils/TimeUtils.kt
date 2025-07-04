@@ -6,7 +6,7 @@ import java.util.*
 fun getTime(): String {
     val currentTime = Date()
     val formatter =
-        SimpleDateFormat("yyyy-MM-dd hh:mm", Locale.ENGLISH)
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ENGLISH)
 
     return formatter.format(currentTime)
 }

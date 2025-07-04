@@ -41,8 +41,8 @@
             android:text="Cancel"
             android:layout_weight="1"
             android:layout_marginEnd="16dp"
-            android:backgroundTint="#00FFCC"
-            android:textColor="@color/black"/>
+            android:backgroundTint="@color/black"
+            android:textColor="@color/white"/>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSearchDialog"
@@ -51,8 +51,8 @@
             android:text="Search"
             android:layout_weight="1"
             android:layout_marginStart="16dp"
-            android:backgroundTint="#00FFCC"
-            android:textColor="@color/black"/>
+            android:backgroundTint="@color/black"
+            android:textColor="@color/white"/>
 
     </LinearLayout>
 
