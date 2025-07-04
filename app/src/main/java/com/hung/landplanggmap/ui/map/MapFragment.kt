@@ -948,7 +948,7 @@ class MapFragment : Fragment() {
 
     //ham Loc dat
     // Hàm lọc danh sách mảnh đất dựa trên giá trị nhập
-    private suspend fun filterLands(searchText: String): List<LandParcel> {
+    private fun filterLands(searchText: String): List<LandParcel> {
         val allLands = landViewModel.lands.value
         val normalizedSearch = searchText.trim().lowercase()
         val searchWithDiacritics =
@@ -971,6 +971,16 @@ class MapFragment : Fragment() {
             searchText.matches(Regex("^<[\\d]+$")) -> { // <500
                 val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
                 allLands.filter { it.area < targetArea }
+            }
+            // Trường hợp nhập số điện thoại
+            searchText.matches(Regex("^\\+?\\d{9,11}$")) -> { // Kiểm tra số điện thoại (9-11 chữ số, có thể có dấu +)
+                val results = allLands.filter { land ->
+                    land.phone?.trim()?.lowercase() == normalizedSearch
+                }
+                if (results.isEmpty()) {
+                    Toast.makeText(requireContext(), "Không có kết quả", Toast.LENGTH_SHORT).show()
+                }
+                results
             }
             // Trường hợp nhập chuỗi (có dấu hoặc không dấu)
             else -> {

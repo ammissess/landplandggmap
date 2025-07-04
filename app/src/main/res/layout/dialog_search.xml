@@ -19,7 +19,7 @@
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Nhập tên chủ sở hữu hoặc diện tích đất">
+        android:hint="Nhập tìm kiếm">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/edtSearch"
