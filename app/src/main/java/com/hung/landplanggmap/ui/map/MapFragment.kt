@@ -66,6 +66,11 @@ import com.hung.landplanggmap.ui.map.theme.getLandColorHex
 import android.content.Context
 import android.graphics.Color
 import android.view.Gravity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.hung.landplanggmap.R
@@ -76,7 +81,6 @@ import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
-
 @AndroidEntryPoint
 class MapFragment : Fragment() {
 
@@ -1349,22 +1353,29 @@ fun LoginButton(
     onLogoutClick: () -> Unit
 ) {
     val context = LocalContext.current
-
     var expanded by remember { mutableStateOf(false) }
 
-    Box {
-        IconButton(
-            onClick = {
+    // Chuyển đổi màu Android sang màu Compose
+    val whiteColor = androidx.compose.ui.graphics.Color(android.graphics.Color.WHITE)
+    val blackColor = androidx.compose.ui.graphics.Color(android.graphics.Color.BLACK)
+
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .shadow(6.dp, CircleShape)
+            .background(whiteColor, CircleShape)  // Sử dụng màu đã chuyển đổi
+            .clip(CircleShape)
+            .clickable {
                 if (isLoggedIn) expanded = true else onLoginClick()
             },
-            modifier = Modifier.size(48.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.AccountCircle,
-                contentDescription = "Account",
-                modifier = Modifier.size(24.dp)
-            )
-        }
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.AccountCircle,
+            contentDescription = "Account",
+            tint = blackColor,  // Sử dụng màu đã chuyển đổi
+            modifier = Modifier.size(32.dp)
+        )
 
         DropdownMenu(
             expanded = expanded,
