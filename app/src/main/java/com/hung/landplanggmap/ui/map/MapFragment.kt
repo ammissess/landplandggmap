@@ -81,6 +81,7 @@ import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+
 @AndroidEntryPoint
 class MapFragment : Fragment() {
 
@@ -177,8 +178,17 @@ class MapFragment : Fragment() {
                         },
                         onLogoutClick = {
                             FirebaseAuth.getInstance().signOut()
-                            Toast.makeText(requireContext(), "Đăng xuất tài khoản thành công", Toast.LENGTH_SHORT).show()
-                            startActivity(Intent(requireActivity(), LoginActivity::class.java)) // Chuyển về LoginActivity
+                            Toast.makeText(
+                                requireContext(),
+                                "Đăng xuất tài khoản thành công",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            startActivity(
+                                Intent(
+                                    requireActivity(),
+                                    LoginActivity::class.java
+                                )
+                            ) // Chuyển về LoginActivity
                             requireActivity().finish() // Đóng Fragment và Activity hiện tại
                         }
                     )
@@ -369,70 +379,109 @@ class MapFragment : Fragment() {
 
     //nút bật tắt tất cả mảnh đất đã vẽ
     private fun initListeners() {
+
         binding.fabLocation.setOnClickListener {
-            getUserLocation()
-            lifecycleScope.launch {
-                val userId = firebaseAuth.currentUser?.uid
-                if (userId != null) {
-                    val userLands = landViewModel.lands.value.filter { it.createdBy == userId }
-                    if (userLands.isNotEmpty()) {
-                        // Chỉ xóa mảnh đất đã lưu, không ảnh hưởng mảnh đất tạm
-                        if (!isLandsVisible) {
-                            val existingAnnotations =
-                                mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
-                            if (existingAnnotations != null) {
-                                val savedAnnotations = existingAnnotations.filter { annotation ->
-                                    userLands.any { land ->
-                                        val landPoints = land.coordinates.map {
+            getUserLocation { location ->
+                if (location != null) {
+                    val point = Point.fromLngLat(location.longitude, location.latitude)
+                    moveToPositionNow(point)
+                    lifecycleScope.launch {
+                        //ten quận huyện hiện tại
+                        val currentDistrict = getDistrictFromLatLngNominatim(point.latitude(), point.longitude())
+                        // Kiểm tra vị trí trong allowedDistrict
+                        if (isPointInAllowedDistrict(point)) {
+                            Toast.makeText(
+                                requireContext(),
+                                "Vị trí: ${currentDistrict ?: "không xác định"} được quy hoạch !",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                requireContext(),
+                                "Vị trí: ${currentDistrict ?: "không xác định"} không quy hoạch !",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        val userId = firebaseAuth.currentUser?.uid
+                        if (userId != null) {
+                            val userLands =
+                                landViewModel.lands.value.filter { it.createdBy == userId }
+                            if (userLands.isNotEmpty()) {
+                                // Chỉ xóa mảnh đất đã lưu, không ảnh hưởng mảnh đất tạm
+                                if (!isLandsVisible) {
+                                    val existingAnnotations =
+                                        mPolygonAnnotationManager?.annotations?.filterIsInstance<PolygonAnnotation>()
+                                    if (existingAnnotations != null) {
+                                        val savedAnnotations =
+                                            existingAnnotations.filter { annotation ->
+                                                userLands.any { land ->
+                                                    val landPoints = land.coordinates.map {
+                                                        Point.fromLngLat(it.lng, it.lat)
+                                                    }
+                                                    val annotationPoints =
+                                                        (annotation.geometry as? Polygon)?.coordinates()
+                                                            ?.get(0)
+                                                            ?.map {
+                                                                Point.fromLngLat(
+                                                                    it.longitude(),
+                                                                    it.latitude()
+                                                                )
+                                                            }
+                                                            ?: emptyList()
+                                                    landPoints.size == annotationPoints.size && landPoints.containsAll(
+                                                        annotationPoints
+                                                    )
+                                                }
+                                            }
+                                        if (savedAnnotations.isNotEmpty()) {
+                                            mPolygonAnnotationManager?.delete(savedAnnotations)
+                                        }
+                                    }
+                                }
+                                if (isLandsVisible) {
+                                    mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
+                                    userLands.forEach { land ->
+                                        val points = land.coordinates.map {
                                             Point.fromLngLat(
                                                 it.lng,
                                                 it.lat
                                             )
                                         }
-                                        val annotationPoints =
-                                            (annotation.geometry as? Polygon)?.coordinates()?.get(0)
-                                                ?.map {
-                                                    Point.fromLngLat(it.longitude(), it.latitude())
-                                                } ?: emptyList()
-                                        landPoints.size == annotationPoints.size && landPoints.containsAll(
-                                            annotationPoints
-                                        )
+                                        if (points.size > 2) {
+                                            val colorHex = getLandColorHex(land.landType)
+                                            val polygonAnnotationOptions =
+                                                PolygonAnnotationOptions()
+                                                    .withPoints(listOf(points))
+                                                    .withFillColor(colorHex)
+                                                    .withFillOpacity(0.4)
+                                            mPolygonAnnotationManager?.create(
+                                                polygonAnnotationOptions
+                                            )
+                                        }
                                     }
                                 }
-                                if (savedAnnotations.isNotEmpty()) {
-                                    mPolygonAnnotationManager?.delete(savedAnnotations)
-                                }
+                                // Luôn vẽ lại mảnh đất tạm, không bị xóa
+                                drawCurrentPolygon()
+                                Toast.makeText(
+//                                    requireContext(),
+//                                    "Hiển thị mảnh đất của bạn",
+//                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Chưa quy hoạch mảnh đất nào",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
-                        if (isLandsVisible) {
-                            mPolygonAnnotationManager?.deleteAll() // Xóa tất cả trước khi vẽ lại
-                            userLands.forEach { land ->
-                                val points =
-                                    land.coordinates.map { Point.fromLngLat(it.lng, it.lat) }
-                                if (points.size > 2) {
-                                    val colorHex = getLandColorHex(land.landType)
-                                    val polygonAnnotationOptions = PolygonAnnotationOptions()
-                                        .withPoints(listOf(points))
-                                        .withFillColor(colorHex)
-                                        .withFillOpacity(0.4)
-                                    mPolygonAnnotationManager?.create(polygonAnnotationOptions)
-                                }
-                            }
-                        }
-                        // Luôn vẽ lại mảnh đất tạm, không bị xóa
-                        drawCurrentPolygon()
-                        Toast.makeText(
-                            requireContext(),
-                            "Hiển thị mảnh đất của bạn",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        Toast.makeText(
-                            requireContext(),
-                            "Bạn chưa có mảnh đất nào",
-                            Toast.LENGTH_SHORT
-                        ).show()
                     }
+                } else {
+                    Toast.makeText(
+                        requireContext(),
+                        "Không thể xác định vị trí hiện tại",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
@@ -454,7 +503,7 @@ class MapFragment : Fragment() {
             if (firebaseAuth.currentUser == null) {
                 Toast.makeText(
                     requireContext(),
-                    "Login để thực hiện quy hoạch đất trên bản đồ",
+                    "Yêu cầu đăng nhập tài khoản",
                     Toast.LENGTH_SHORT
                 ).show()
                 startActivity(Intent(requireActivity(), LoginActivity::class.java))
@@ -493,7 +542,7 @@ class MapFragment : Fragment() {
             if (firebaseAuth.currentUser == null) {
                 Toast.makeText(
                     requireContext(),
-                    "Login để thực hiện quy hoạch đất trên bản đồ",
+                    "Yêu cầu đăng nhập tài khoản",
                     Toast.LENGTH_SHORT
                 ).show()
                 startActivity(Intent(requireActivity(), LoginActivity::class.java))
@@ -645,7 +694,7 @@ class MapFragment : Fragment() {
                 } ?: run {
                     Toast.makeText(
                         requireContext(),
-                        "Không tìm thấy khu vực được phép",
+                        "Không tìm thấy khu vực quy hoạch",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -1088,7 +1137,7 @@ class MapFragment : Fragment() {
         mPointsList.clear()
     }
 
-    private fun getUserLocation() {
+    private fun getUserLocation(onLocationResult: (Location?) -> Unit) {
         val context = context ?: return
         if (ActivityCompat.checkSelfPermission(
                 context,
@@ -1096,19 +1145,51 @@ class MapFragment : Fragment() {
             ) == PackageManager.PERMISSION_GRANTED
         ) {
             mFusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-                if (location != null) {
-                    val point = Point.fromLngLat(location.longitude, location.latitude)
-                    moveToPosition(point, true)
-                } else {
-                    Toast.makeText(
-                        requireContext(),
-                        "Dữ liệu vị trí không hợp lệ",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
+                onLocationResult(location)
+            }.addOnFailureListener { e ->
+                Log.e(TAG, "Error getting location: ${e.message}")
+                onLocationResult(null)
             }
+        } else {
+            onLocationResult(null)
         }
     }
+
+
+    //Hàm xac dinh vi tri hien tai
+    private fun moveToPositionNow(location: Point, showPositionMarker: Boolean = true) {
+        val mapboxMap = mMapView?.getMapboxMap() ?: return
+
+        if (showPositionMarker) {
+            mapboxMap.loadStyle(
+                styleExtension = style(Style.MAPBOX_STREETS) {
+                    +image("ic_position") {
+                        bitmap(BitmapFactory.decodeResource(resources, R.drawable.ic_man_standing))
+                    }
+                    +geoJsonSource("position_source_id") {
+                        geometry(location)
+                    }
+                    +symbolLayer("position_layer_id", "position_source_id") {
+                        iconImage("ic_position")
+                        iconAnchor(IconAnchor.BOTTOM)
+                    }
+                }
+            ) {
+                val cameraPosition = CameraOptions.Builder()
+                    .zoom(17.0) // Zoom rõ vị trí hiện tại
+                    .center(location)
+                    .build()
+                mapboxMap.setCamera(cameraPosition)
+            }
+        } else {
+            val cameraPosition = CameraOptions.Builder()
+                .zoom(17.0)
+                .center(location)
+                .build()
+            mapboxMap.setCamera(cameraPosition)
+        }
+    }
+
 
     //cái này là zoom khi sur dung tim kiem dia diem
     private fun moveToPosition2(location: Point, showPositionMarker: Boolean = false) {

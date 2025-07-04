@@ -84,6 +84,20 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="8dp" />
 
+    <!-- Nút Chỉ đường -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnNavigate"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Chỉ đường"
+        android:textColor="@color/white"
+        app:backgroundTint="@color/black"
+        app:layout_constraintTop_toBottomOf="@+id/tvRegisterDate"
+        app:layout_constraintEnd_toStartOf="@+id/btnClosee"
+        app:layout_constraintBottom_toBottomOf="@+id/btnClosee"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="8dp" />
+
     <!-- Nút đóng -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnClosee"
