@@ -88,10 +88,10 @@ class LoginActivity : ComponentActivity() {
         email: String,
         password: String,
         onSuccess: () -> Unit,
-        onError: (String) -> Unit
+        onError: (String?) -> Unit
     ) {
         if (email.isEmpty() || password.isEmpty()) {
-            onError("Please enter email and password")
+            onError("Yêu cầu nhập đầy đủ tên đăng nhập và mật khẩu")
             return
         }
 
@@ -109,19 +109,25 @@ class LoginActivity : ComponentActivity() {
                                 finish()
                                 onSuccess()
                             }
+                            .addOnFailureListener {
+                                startActivity(Intent(this, MainActivity::class.java))
+                                finish()
+                                onSuccess()
+                            }
                     } else {
                         startActivity(Intent(this, MainActivity::class.java))
                         finish()
+                        onSuccess()
                     }
                 } else {
-                    Toast.makeText(
-                        this,
-                        "Đăng nhập thất bại: ${task.exception?.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    onError(null)
+                    Toast.makeText(this, "Tài khoản hoặc mật khẩu sai", Toast.LENGTH_SHORT).show()
                 }
             }
     }
+
+
+
 }
 
 @Composable
