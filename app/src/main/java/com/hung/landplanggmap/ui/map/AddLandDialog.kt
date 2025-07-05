@@ -28,14 +28,14 @@ fun AddLandDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Nhập thông tin thửa đất") },
+        title = { Text("Nhập thông tin chủ đất") },
         text = {
             Column {
                 // Trường nhập tên chủ đất
                 OutlinedTextField(
                     value = ownerName,
-                    onValueChange = {
-                        ownerName = it.trim()
+                    onValueChange = { newValue ->
+                        ownerName = newValue // Không dùng trim() để giữ dấu cách
                         ownerError = null // Reset lỗi khi nhập lại
                     },
                     label = { Text("Tên chủ đất") },
