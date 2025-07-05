@@ -57,9 +57,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.ComposeView
 import com.hung.landplanggmap.data.model.LatLng
 import com.hung.landplanggmap.utils.getTime
-import android.widget.EditText
-import android.widget.Spinner
-import android.widget.ArrayAdapter
 import com.hung.landplanggmap.utils.centerOfLatLngPolygon
 import com.hung.landplanggmap.utils.isPolygonIntersect
 import com.hung.landplanggmap.ui.map.theme.getLandColorHex
@@ -73,7 +70,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.hung.landplanggmap.R
 import com.hung.landplanggmap.databinding.FragmentMapBinding
-import org.locationtech.jts.algorithm.ConvexHull
 import com.mapbox.geojson.LineString
 import com.mapbox.maps.extension.style.layers.addLayer
 import com.mapbox.maps.extension.style.layers.generated.lineLayer
@@ -84,8 +80,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -104,15 +98,14 @@ class MapFragment : Fragment() {
     //bien kiem tra xac dinh vi tri
     private var isLocationDetermined = false
 
-    //đếm lần click nút chỉ định
-    private var clickCount = 0
-
     //nút bật tắt vùng quy hoạch
     private var isLandsVisible = false
-    private val RED_DARK_COLOR = "#FF0000" // Màu đỏ đậm (Hex code)
 
     //chi tiết đất
     private var selectedLand: LandParcel? = null
+
+    // Theo dõi dialog hiện tại
+    private var currentDialog: BottomSheetDialog? = null
 
 
     private var _binding: FragmentMapBinding? = null
@@ -142,6 +135,16 @@ class MapFragment : Fragment() {
     private var mSavedPolygonsBottomSheetDialog: BottomSheetDialog? = null
     private var mSavedPolygonsAdapter: SavedPolygonsAdapter? = null
 
+    // Kiểm tra xem dialog có đang hiển thị không
+    private fun isDialogShowing(): Boolean {
+        return currentDialog?.isShowing == true
+    }
+
+    // Hủy dialog hiện tại
+    private fun dismissCurrentDialog() {
+        currentDialog?.dismiss()
+        currentDialog = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -302,7 +305,14 @@ class MapFragment : Fragment() {
                                 }
 
                                 clickedLand?.let { land ->
-                                    // Gọi nháy xong mới hiện dialog
+                                    // Kiểm tra và hủy dialog cũ nếu đang hiển thị
+                                    if (selectedLand == land && isDialogShowing()) {
+                                        return@addOnMapClickListener true
+                                    }
+                                    dismissCurrentDialog()
+                                    selectedLand = land
+
+                                    // Gọi nháy và hiển thị dialog
                                     lifecycleScope.launch {
                                         flashPolygon(annotation)
                                         showLandDetailDialog(land)
@@ -314,12 +324,9 @@ class MapFragment : Fragment() {
                     }
                     false
                 }
-
-
             }
         }
     }
-
 
     // Cập nhật phương thức moveToPosition, zoom màn hình bản đồ
     private fun moveToPosition(
@@ -607,7 +614,6 @@ class MapFragment : Fragment() {
             drawCurrentPolygon() // Giữ mảnh đất tạm nếu có
         }
 
-
 // Sự kiện nhấn vào biểu tượng tìm kiếm (chỉ tìm kiếm địa điểm trong allowedDistrict)
         binding.ivSearchIcon.setOnClickListener {
             val dialogView =
@@ -621,7 +627,6 @@ class MapFragment : Fragment() {
             dialog.setContentView(dialogView)
             val displayMetrics = resources.displayMetrics
             val height = (displayMetrics.heightPixels * 0.2).toInt() // Đặt chiều cao cố định 25%
-            //dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) // Full chiều rộng
             dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, height)
             dialog.window?.setGravity(Gravity.TOP)
             dialog.window?.setBackgroundDrawable(null) // Loại bỏ nền mặc định để bo góc hiển thị
@@ -1067,7 +1072,7 @@ class MapFragment : Fragment() {
                                 val firstLand = results.first()
                                 val center = firstLand.coordinates.centerOfLatLngPolygon().toPoint()
                                 mMapView?.getMapboxMap()?.setCamera(
-                                    CameraOptions.Builder().center(center).zoom(14.0).build()
+                                    CameraOptions.Builder().center(center).zoom(16.0).build()
                                 )
                             }
 
