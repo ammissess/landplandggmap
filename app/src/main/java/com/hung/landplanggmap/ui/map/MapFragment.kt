@@ -86,7 +86,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 @AndroidEntryPoint
 class MapFragment : Fragment() {
 
@@ -131,9 +133,9 @@ class MapFragment : Fragment() {
     private var allowedCountry: String? = null
 
     // Compose dialog state
-    private var showAddLandDialog = false
-    private var lastArea: Long = 0L
-    private var lastCoordinates: List<LatLng> = emptyList()
+    private var showAddLandDialog by mutableStateOf(false)
+    private var lastArea by mutableStateOf(0L)
+    private var lastCoordinates by mutableStateOf(emptyList<LatLng>())
 
     // Saved polygons dialog
     private var mSavedPolygonsBottomSheetDialog: BottomSheetDialog? = null
@@ -214,29 +216,28 @@ class MapFragment : Fragment() {
                     AddLandDialog(
                         area = lastArea,
                         onDismiss = { showAddLandDialog = false },
-                        onSave = { ownerName, phone, address, landType ->
-                            val land = LandParcel(
-                                address = address,
-                                registerDate = getTime(),
-                                ownerName = ownerName,
-                                area = lastArea,
-                                landType = landType,
-                                coordinates = lastCoordinates,
-                                phone = phone,
-                                createdBy = firebaseAuth.currentUser?.uid ?: "",
-                                district = allowedDistrict ?: "",
-                                province = allowedProvince ?: "",
-                                country = allowedCountry ?: ""
-                            )
-                            landViewModel.addLand(land)
-                            showAddLandDialog = false
-                            Toast.makeText(
-                                requireContext(),
-                                "Lưu mảnh đất thành công",
-                                Toast.LENGTH_SHORT
-                            )
-                                .show()
-                            clearMapView()
+                        onSave = { ownerName, phone, landType, _ ->
+                            lifecycleScope.launch {
+                                val center = lastCoordinates.centerOfLatLngPolygon()
+                                val address = getAddressFromLatLng(center.lat, center.lng) ?: "Không xác định"
+                                val land = LandParcel(
+                                    address = address, // Đảm bảo lấy địa chỉ từ API
+                                    registerDate = getTime(),
+                                    ownerName = ownerName,
+                                    area = lastArea,
+                                    landType = landType,
+                                    coordinates = lastCoordinates,
+                                    phone = phone,
+                                    createdBy = firebaseAuth.currentUser?.uid ?: "",
+                                    district = allowedDistrict ?: "",
+                                    province = allowedProvince ?: "",
+                                    country = allowedCountry ?: ""
+                                )
+                                landViewModel.addLand(land)
+                                showAddLandDialog = false
+                                Toast.makeText(requireContext(), "Lưu mảnh đất thành công", Toast.LENGTH_SHORT).show()
+                                clearMapView()
+                            }
                         }
                     )
                 }
@@ -557,7 +558,9 @@ class MapFragment : Fragment() {
                 return@setOnClickListener
             }
 
-            showAddLandDialog(area, coordinates)
+            showAddLandDialog = true
+            lastArea = area
+            lastCoordinates = coordinates
         }
 
         binding.btnList.setOnClickListener {
@@ -1620,50 +1623,6 @@ class MapFragment : Fragment() {
         }
     }
 
-    private fun showAddLandDialog(area: Long, coordinates: List<LatLng>) {
-        val dialogView =
-            LayoutInflater.from(requireContext()).inflate(R.layout.dialog_add_land, null)
-        val edtOwnerName = dialogView.findViewById<EditText>(R.id.edtOwnerName)
-        val edtPhone = dialogView.findViewById<EditText>(R.id.edtPhone)
-        val spnLandType = dialogView.findViewById<Spinner>(R.id.spnLandType)
-
-        val adapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            listOf("Đất thổ cư", "Đất thổ cảnh", "Loại khác")
-        )
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spnLandType.adapter = adapter
-
-        // Lấy địa chỉ tự động từ điểm trung tâm polygon
-        val center = coordinates.centerOfLatLngPolygon()
-        lifecycleScope.launch {
-            val address = getAddressFromLatLng(center.lat, center.lng) ?: "Không xác định"
-            AlertDialog.Builder(requireContext())
-                .setTitle("Nhập thông tin thửa đất")
-                .setView(dialogView)
-                .setPositiveButton("Lưu") { _, _ ->
-                    val land = LandParcel(
-                        address = address,
-                        registerDate = getTime(),
-                        ownerName = edtOwnerName.text.toString(),
-                        area = area,
-                        landType = spnLandType.selectedItemPosition + 1,
-                        coordinates = coordinates,
-                        phone = edtPhone.text.toString(),
-                        createdBy = firebaseAuth.currentUser?.uid ?: "",
-                        district = allowedDistrict ?: "",
-                        province = allowedProvince ?: "",
-                        country = allowedCountry ?: ""
-                    )
-                    landViewModel.addLand(land)
-                    Toast.makeText(requireContext(), "Polygon saved", Toast.LENGTH_SHORT).show()
-                    clearMapView()
-                }
-                .setNegativeButton("Hủy", null)
-                .show()
-        }
-    }
 
     private suspend fun getAddressFromLatLng(lat: Double, lng: Double): String? {
         val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lng"
