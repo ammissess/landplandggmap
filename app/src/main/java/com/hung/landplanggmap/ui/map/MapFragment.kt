@@ -89,6 +89,7 @@ import org.locationtech.jts.geom.GeometryFactory
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+
 @AndroidEntryPoint
 class MapFragment : Fragment() {
 
@@ -178,6 +179,12 @@ class MapFragment : Fragment() {
             }
         }
 
+        // Đặt vị trí mặc định khi bản đồ được tải, khởi động sẽ hiển thị tại Hà nội
+        mMapView?.getMapboxMap()?.loadStyleUri(Style.MAPBOX_STREETS) {
+            val defaultLocation = Point.fromLngLat(105.8342, 21.0278) // Hà Nội, Việt Nam
+            moveToPosition(defaultLocation, showPositionMarker = true, zoomLevel = 12.0)
+        }
+
         // ComposeView cho login/logout
         val composeView = ComposeView(requireContext()).apply {
             setContent {
@@ -219,7 +226,8 @@ class MapFragment : Fragment() {
                         onSave = { ownerName, phone, landType, _ ->
                             lifecycleScope.launch {
                                 val center = lastCoordinates.centerOfLatLngPolygon()
-                                val address = getAddressFromLatLng(center.lat, center.lng) ?: "Không xác định"
+                                val address =
+                                    getAddressFromLatLng(center.lat, center.lng) ?: "Không xác định"
                                 val land = LandParcel(
                                     address = address, // Đảm bảo lấy địa chỉ từ API
                                     registerDate = getTime(),
@@ -235,7 +243,11 @@ class MapFragment : Fragment() {
                                 )
                                 landViewModel.addLand(land)
                                 showAddLandDialog = false
-                                Toast.makeText(requireContext(), "Lưu mảnh đất thành công", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Lưu mảnh đất thành công",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                                 clearMapView()
                             }
                         }
@@ -954,76 +966,162 @@ class MapFragment : Fragment() {
     private fun filterLands(searchText: String): List<LandParcel> {
         val allLands = landViewModel.lands.value
         val normalizedSearch = searchText.trim().lowercase()
-        val searchWithDiacritics =
-            normalizeVietnameseDiacritics(normalizedSearch) // Chuẩn hóa có dấu
+        val searchWithDiacritics = normalizeVietnameseDiacritics(normalizedSearch)
 
         return when {
-            // Trường hợp nhập số (giữ nguyên logic cũ)
-            searchText.matches(Regex("^\\d+$")) -> {
+            // Trường hợp nhập số diện tích đất (dưới hoặc bằng 6 chữ số)
+            searchText.matches(Regex("^\\d{1,6}$")) -> {
                 val targetArea = searchText.toLong()
-                val minArea = (targetArea * 0.5).toLong() // 50% dưới
-                val maxArea = (targetArea * 1.5).toLong() // 50% trên
+                val minArea = (targetArea * 0.5).toLong()
+                val maxArea = (targetArea * 1.5).toLong()
                 allLands.filter { it.area in minArea..maxArea }
             }
 
-            searchText.matches(Regex("^>[\\d]+$")) -> { // >500
+            searchText.matches(Regex("^>[\\d]+$")) -> {
                 val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
                 allLands.filter { it.area > targetArea }
             }
 
-            searchText.matches(Regex("^<[\\d]+$")) -> { // <500
+            searchText.matches(Regex("^<[\\d]+$")) -> {
                 val targetArea = searchText.drop(1).toLongOrNull() ?: 0L
                 allLands.filter { it.area < targetArea }
             }
-            // Trường hợp nhập số điện thoại
-            searchText.matches(Regex("^\\+?\\d{9,11}$")) -> { // Kiểm tra số điện thoại (9-11 chữ số, có thể có dấu +)
-                val results = allLands.filter { land ->
-                    land.phone?.trim()?.lowercase() == normalizedSearch
+            // Trường hợp nhập số điện thoại (hơn 6 chữ số)
+            searchText.length > 6 -> {
+                val cleanedPhone = normalizedSearch.replace(Regex("[^0-9+]"), "")
+                when {
+                    cleanedPhone.startsWith("+84") && cleanedPhone.length == 12 && cleanedPhone.matches(
+                        Regex("^\\+84\\d{9}$")
+                    ) -> {
+                        val phoneNumber = cleanedPhone
+                        val results = allLands.filter { land ->
+                            land.phone?.trim()?.lowercase() == phoneNumber
+                        }
+                        when {
+                            results.isNotEmpty() -> {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Tìm thấy số điện thoại phù hợp",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                val firstLand = results.first()
+                                val center = firstLand.coordinates.centerOfLatLngPolygon().toPoint()
+                                mMapView?.getMapboxMap()?.setCamera(
+                                    CameraOptions.Builder().center(center).zoom(14.0).build()
+                                )
+                            }
+
+                            else -> Toast.makeText(
+                                requireContext(),
+                                "Số điện thoại không tìm thấy",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        results
+                    }
+
+                    cleanedPhone.length == 10 && cleanedPhone.matches(Regex("^\\d{10}$")) -> {
+                        val phoneNumber = cleanedPhone
+                        val results = allLands.filter { land ->
+                            land.phone?.trim()?.lowercase() == phoneNumber
+                        }
+                        when {
+                            results.isNotEmpty() -> {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Tìm thấy số điện thoại phù hợp",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                val firstLand = results.first()
+                                val center = firstLand.coordinates.centerOfLatLngPolygon().toPoint()
+                                mMapView?.getMapboxMap()?.setCamera(
+                                    CameraOptions.Builder().center(center).zoom(14.0).build()
+                                )
+                            }
+
+                            else -> Toast.makeText(
+                                requireContext(),
+                                "Số điện thoại không tìm thấy",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        results
+                    }
+                    // Thêm kiểm tra số đầu Việt Nam (tùy chọn)
+                    cleanedPhone.length in 9..11 && (cleanedPhone.startsWith("09") || cleanedPhone.startsWith(
+                        "03"
+                    ) || cleanedPhone.startsWith("07") || cleanedPhone.startsWith("08")) && cleanedPhone.matches(
+                        Regex("^\\d{9,11}$")
+                    ) -> {
+                        val phoneNumber = cleanedPhone
+                        val results = allLands.filter { land ->
+                            land.phone?.trim()?.lowercase() == phoneNumber
+                        }
+                        when {
+                            results.isNotEmpty() -> {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Tìm thấy số điện thoại phù hợp",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                val firstLand = results.first()
+                                val center = firstLand.coordinates.centerOfLatLngPolygon().toPoint()
+                                mMapView?.getMapboxMap()?.setCamera(
+                                    CameraOptions.Builder().center(center).zoom(14.0).build()
+                                )
+                            }
+
+                            else -> Toast.makeText(
+                                requireContext(),
+                                "Số điện thoại không tìm thấy",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        results
+                    }
+
+                    else -> {
+                        Toast.makeText(
+                            requireContext(),
+                            "Nhập sai định dạng số điện thoại",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        emptyList()
+                    }
                 }
-                if (results.isEmpty()) {
-                    Toast.makeText(requireContext(), "Không có kết quả", Toast.LENGTH_SHORT).show()
-                }
-                results
             }
             // Trường hợp nhập chuỗi (có dấu hoặc không dấu)
             else -> {
                 val results = mutableListOf<LandParcel>()
-                val searchWords =
-                    normalizedSearch.split(" ") // Tách thành các từ (ví dụ: "Hoàng Thị Yến" -> ["hoang", "thi", "yen"])
+                val searchWords = normalizedSearch.split(" ")
 
                 allLands.forEach { land ->
                     land.ownerName?.let { ownerName ->
                         val normalizedOwner = ownerName.lowercase()
                         val ownerWithDiacritics = normalizeVietnameseDiacritics(normalizedOwner)
 
-                        // Ưu tiên 1: Khớp hoàn toàn với chuỗi có dấu
                         if (ownerWithDiacritics.contains(searchWithDiacritics, ignoreCase = true)) {
                             results.add(land)
-                        }
-                        // Ưu tiên 2: Khớp hoàn toàn với chuỗi không dấu
-                        else if (normalizedOwner.contains(normalizedSearch, ignoreCase = true)) {
+                        } else if (normalizedOwner.contains(normalizedSearch, ignoreCase = true)) {
                             results.add(land)
-                        }
-                        // Ưu tiên 3: Tìm kiếm gần giống (Levenshtein Distance)
-                        else {
+                        } else {
                             val similarity = calculateSimilarity(normalizedSearch, normalizedOwner)
-                            if (similarity > 0.7) { // Ngưỡng tương đồng 70%
+                            if (similarity > 0.7) {
                                 results.add(land)
                             }
                         }
                     }
                 }
 
-                // Sắp xếp kết quả: Ưu tiên có dấu > không dấu > gần giống
                 results.sortWith(compareByDescending { land ->
                     val ownerName = land.ownerName?.lowercase() ?: ""
                     val isDiacriticMatch =
                         ownerName.contains(searchWithDiacritics, ignoreCase = true)
                     val isNoDiacriticMatch = ownerName.contains(normalizedSearch, ignoreCase = true)
                     when {
-                        isDiacriticMatch -> 2 // Ưu tiên cao nhất
-                        isNoDiacriticMatch -> 1 // Ưu tiên trung bình
-                        else -> 0 // Gần giống
+                        isDiacriticMatch -> 2
+                        isNoDiacriticMatch -> 1
+                        else -> 0
                     }
                 })
 
@@ -1282,12 +1380,32 @@ class MapFragment : Fragment() {
         dialog.setContentView(dialogView)
 
         // Gán giá trị cho các TextView
+        val tvPhone =
+            dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvPhone)
+        tvPhone.text = "Số điện thoại: ${land.phone}"
+        tvPhone.setOnClickListener {
+            land.phone?.let { phone ->
+                val clipboard =
+                    requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Phone", phone))
+                Toast.makeText(
+                    requireContext(),
+                    "Số điện thoại đã được sao chép",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                // Mở ứng dụng gọi điện
+                val intent = Intent(Intent.ACTION_DIAL).apply {
+                    data = android.net.Uri.parse("tel:$phone")
+                }
+                startActivity(intent)
+            }
+        }
+
         dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvOwnerName).text =
             "Tên chủ sở hữu: ${land.ownerName}"
         dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvArea).text =
             "Diện tích: ${land.area} m²"
-        dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvPhone).text =
-            "Số điện thoại: ${land.phone}"
         dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvAddress).text =
             "Địa chỉ: ${land.address}"
         dialogView.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.tvRegisterDate).text =
@@ -1304,8 +1422,7 @@ class MapFragment : Fragment() {
         layoutParams.height = height
         dialogView.layoutParams = layoutParams
 
-
-// Nút Chỉ đường
+        // Nút Chỉ đường
         dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnNavigate)
             .setOnClickListener {
                 if (!isLocationDetermined) {
